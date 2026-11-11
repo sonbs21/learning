@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vì sao cần Spring</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Vì sao cần Spring?</h1>
+<p class="subtitle">Bài 1 · Hiểu vấn đề mà Spring giải quyết, rồi để Spring tự tạo object cho bạn</p>
+<div class="meta"><span>~40 phút</span><span>Cần biết: class, interface, constructor trong Java</span><span>Lab: <code>./lab</code></span></div>
+
+<p>Mọi thứ trong Spring (REST API, database, security…) đều đứng trên <strong>một ý tưởng duy nhất</strong>. Nắm được ý tưởng đó ở bài này thì các bài sau sẽ dễ hơn rất nhiều. Ta bắt đầu bằng code Java thuần, chưa có Spring.</p>
+
+<h2>1 · Bài toán: một cửa hàng online</h2>
+<p>Khi khách đặt hàng, hệ thống tạo đơn và gửi email cảm ơn. Cách viết đầu tiên ai cũng nghĩ tới là:</p>
+
+<pre><code>public class OrderService {
+
+    private final ConsoleEmailSender emailSender = <span class="bad-hl">new ConsoleEmailSender()</span>;
+
+    public void placeOrder(String customer) {
+        System.out.println("Đã tạo đơn hàng cho " + customer);
+        emailSender.send(customer, "Cảm ơn bạn đã đặt hàng!");
+    }
+}</code></pre>
+
+<p>Code chạy được. Nhưng hãy thử hình dung ba tình huống rất thật:</p>
+<ul>
+  <li>Sếp muốn chuyển sang gửi <strong>SMS</strong>. Bạn phải <em>mở <code>OrderService</code> ra sửa</em>, dù logic đặt hàng không hề thay đổi.</li>
+  <li>Bạn muốn viết <strong>test</strong> cho <code>placeOrder</code>. Mỗi lần chạy test là một lần gửi email thật, và bạn không có cách nào thay bằng bản giả.</li>
+  <li><code>ConsoleEmailSender</code> lại cần thêm một <code>SmtpConfig</code>, <code>SmtpConfig</code> lại cần thêm thứ khác… và <code>OrderService</code> phải tự <code>new</code> cả chuỗi đó.</li>
+</ul>
+<p>Gốc rễ của cả ba: <code>OrderService</code> <strong>tự quyết định và tự tạo</strong> thứ nó cần dùng.</p>
+
+<h2>2 · Cách sửa: đừng tự tạo, hãy nhận từ bên ngoài</h2>
+<p>Ta tách ra một <code>interface</code> mô tả <em>việc cần làm</em> (gửi tin), và cho <code>OrderService</code> <strong>nhận</strong> nó qua constructor:</p>
+
+<pre><code>public interface EmailSender {
+    void send(String to, String message);
+}
+
+public class OrderService {
+
+    private final EmailSender emailSender;
+
+    public OrderService(<span class="hl">EmailSender emailSender</span>) {   // nhận từ bên ngoài
+        this.emailSender = emailSender;
+    }
+    // placeOrder giữ nguyên
+}
+
+// Ở hàm main, CHÍNH BẠN lắp ráp các object:
+EmailSender sender = new ConsoleEmailSender();
+OrderService orderService = new OrderService(sender);</code></pre>
+
+<p>Giờ muốn đổi sang SMS thì chỉ cần truyền vào một <code>SmsSender</code>, còn khi test thì truyền một bản giả. <code>OrderService</code> không phải sửa dòng nào.</p>
+
+<p class="big-idea">Đưa vào cho một object những thứ nó cần, thay vì để nó tự tạo, gọi là <strong>Dependency Injection (DI)</strong>, tức "tiêm phụ thuộc". Ở đây, <code>EmailSender</code> là <em>dependency</em> (phụ thuộc) của <code>OrderService</code>.</p>
+
+<p>Còn một vấn đề nữa. App thật có hàng trăm class, và hàm <code>main</code> sẽ thành một đống <code>new</code> lắp ráp bằng tay khổng lồ. Ai sẽ làm việc lắp ráp đó?</p>
+
+<h2>3 · Spring: thuê một "thợ lắp ráp"</h2>
+<p>Spring có sẵn một object đặc biệt gọi là <strong>container</strong>. Trong code, container có tên là <code>ApplicationContext</code>. Bạn chỉ cần đánh dấu "class này hãy quản lý giúp tôi" bằng <code>@Component</code>, còn lại container lo:</p>
+
+<ol class="flow">
+  <li>Khi app khởi động, Spring <strong>quét</strong> package chứa class main (<code>dev.lab</code>) để tìm các class có <code>@Component</code>.</li>
+  <li>Spring thấy <code>OrderService</code> có constructor cần một <code>EmailSender</code>, và thấy <code>ConsoleEmailSender</code> chính là một <code>EmailSender</code>.</li>
+  <li>Spring tạo <code>ConsoleEmailSender</code> trước, rồi <strong>tự truyền nó vào</strong> constructor của <code>OrderService</code>.</li>
+  <li>Spring giữ các object này trong container. Bạn cần object nào thì xin container object đó.</li>
+</ol>
+
+<p>Object do container tạo, lắp ráp và quản lý được gọi là <strong>bean</strong>. <a class="cite" href="https://docs.spring.io/spring-framework/reference/core/beans/introduction.html">[docs]</a></p>
+
+<div class="callout">
+  <strong>"Inversion of Control" (IoC) là gì?</strong>
+  Trước đây, class tự <em>điều khiển</em> việc tạo các dependency của nó. Bây giờ quyền đó được <em>đảo ngược</em> và chuyển sang cho container. Docs của Spring viết rõ: DI là một dạng cụ thể của IoC, trong đó object chỉ <em>khai báo</em> thứ nó cần (qua constructor…), còn container <em>tiêm</em> thứ đó vào khi tạo bean. <a class="cite" href="https://docs.spring.io/spring-framework/reference/core/beans/introduction.html">[docs]</a>
+</div>
+
+<p><em>Spring và Spring Boot khác nhau ở đâu?</em> Container là của <strong>Spring Framework</strong>. <strong>Spring Boot</strong> giúp khởi động Spring thật nhanh: chỉ một dòng <code>SpringApplication.run(...)</code> là đã có container chạy, không cần cấu hình gì thêm.</p>
+
+<hr>
+
+<h2>4 · Thực hành</h2>
+<div class="lab">
+<h3>Lab 1 · ~20 phút</h3>
+<p>Project <code>lab/</code> đã có sẵn file <code>LabApplication.java</code>. Bạn tự gõ code dưới đây vào thư mục <code>lab/src/main/java/dev/lab/</code>. Hãy <strong>gõ</strong> chứ đừng copy-paste, vì gõ tay giúp bạn để ý từng chi tiết.</p>
+<ol>
+  <li><code>EmailSender.java</code>
+<pre><code>package dev.lab;
+
+public interface EmailSender {
+    void send(String to, String message);
+}</code></pre></li>
+
+  <li><code>ConsoleEmailSender.java</code>: "gửi" bằng cách in ra màn hình
+<pre><code>package dev.lab;
+
+import org.springframework.stereotype.Component;
+
+@Component
+public class ConsoleEmailSender implements EmailSender {
+
+    @Override
+    public void send(String to, String message) {
+        System.out.println("Gửi email tới " + to + ": " + message);
+    }
+}</code></pre></li>
+
+  <li><code>OrderService.java</code>: để ý là <strong>không có chữ <code>new</code> nào</strong>
+<pre><code>package dev.lab;
+
+import org.springframework.stereotype.Component;
+
+@Component
+public class OrderService {
+
+    private final EmailSender emailSender;
+
+    public OrderService(EmailSender emailSender) {
+        this.emailSender = emailSender;
+    }
+
+    public void placeOrder(String customer) {
+        System.out.println("Đã tạo đơn hàng cho " + customer);
+        emailSender.send(customer, "Cảm ơn bạn đã đặt hàng!");
+    }
+}</code></pre></li>
+
+  <li>Sửa <code>LabApplication.java</code> để xin container bean <code>OrderService</code>:
+<pre><code>package dev.lab;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ApplicationContext;
+
+@SpringBootApplication
+public class LabApplication {
+
+    public static void main(String[] args) {
+        ApplicationContext context = SpringApplication.run(LabApplication.class, args);
+
+        OrderService orderService = context.getBean(OrderService.class);
+        orderService.placeOrder("an@example.com");
+    }
+}</code></pre></li>
+
+  <li>Chạy app:
+<pre><code>cd lab
+mvn -o -q spring-boot:run</code></pre>
+  <strong>Trước khi chạy, hãy đoán:</strong> có in ra 2 dòng không? Ai đã gọi <code>new ConsoleEmailSender()</code>?</li>
+</ol>
+
+<details>
+  <summary>Kết quả mong đợi</summary>
+<pre><code>Đã tạo đơn hàng cho an@example.com
+Gửi email tới an@example.com: Cảm ơn bạn đã đặt hàng!</code></pre>
+  <p>Trong code của bạn không có dòng <code>new</code> nào cả. <strong>Spring</strong> đã tạo cả hai object và lắp chúng lại với nhau.</p>
+</details>
+
+<h3>Thí nghiệm A: làm hỏng có chủ đích</h3>
+<p>Xoá dòng <code>@Component</code> trong <code>ConsoleEmailSender</code> rồi chạy lại. Đoán trước xem chuyện gì sẽ xảy ra, sau đó đọc kỹ thông báo lỗi.</p>
+<details>
+  <summary>Lỗi bạn sẽ thấy</summary>
+<pre><code>APPLICATION FAILED TO START
+
+Description:
+Parameter 0 of constructor in dev.lab.OrderService
+<span class="bad-hl">required a bean of type 'dev.lab.EmailSender' that could not be found.</span>
+
+Action:
+Consider defining a bean of type 'dev.lab.EmailSender' in your configuration.</code></pre>
+  <p>Đọc lỗi này theo từng ý: <em>"Tham số số 0 trong constructor của OrderService cần một bean kiểu EmailSender, nhưng container không có bean nào như vậy."</em> Spring không biết đến <code>ConsoleEmailSender</code> nữa vì class đó đã mất <code>@Component</code>. Bạn sẽ gặp lỗi này <strong>rất nhiều</strong> khi đi làm, nên nhớ kỹ cách đọc nó. Đọc xong thì thêm <code>@Component</code> trở lại.</p>
+</details>
+
+<h3>Thí nghiệm B: hai ứng viên</h3>
+<p>Tạo thêm <code>SmsSender.java</code>, cũng có <code>@Component</code> và cũng <code>implements EmailSender</code> (in ra "Gửi SMS tới…"). Chạy lại. Lần này Spring sẽ chọn class nào?</p>
+<details>
+  <summary>Lỗi bạn sẽ thấy</summary>
+<pre><code>Parameter 0 of constructor in dev.lab.OrderService
+<span class="bad-hl">required a single bean, but 2 were found:</span>
+	- consoleEmailSender: defined in file [.../ConsoleEmailSender.class]
+	- smsSender: defined in file [.../SmsSender.class]
+
+Action:
+Consider marking one of the beans as @Primary, ... or using @Qualifier ...</code></pre>
+  <p>Spring không đoán bừa. Có hai bean cùng khớp thì nó dừng lại và bắt bạn chọn. Để ý thêm: tên bean mặc định là tên class với chữ cái đầu viết thường (<code>consoleEmailSender</code>). <code>@Primary</code> và <code>@Qualifier</code> là chủ đề của bài sau. Giờ bạn xoá <code>SmsSender.java</code> đi.</p>
+</details>
+</div>
+
+<hr>
+
+<h2>5 · Kiểm tra trí nhớ</h2>
+<p>Làm quiz <strong>mà không kéo lên đọc lại</strong>. Việc phải cố nhớ lại chính là thứ giúp bạn nhớ lâu.</p>
+
+<div class="quiz" data-quiz="q1"></div>
+<script type="application/json" id="q1">
+[
+  {
+    "q": "Trong code ban đầu, <code>OrderService</code> tự gọi <code>new ConsoleEmailSender()</code>. Vấn đề chính của cách viết này là gì?",
+    "options": [
+      "OrderService bị trói chặt vào một cách gửi email cụ thể",
+      "Gọi new trong Java chạy chậm hơn để Spring tạo object",
+      "Java không cho phép gọi new bên trong một constructor khác"
+    ],
+    "answer": 0,
+    "why": "Muốn đổi sang SMS hay dùng bản giả khi test đều phải sửa <code>OrderService</code>, vì chính nó quyết định và tạo ra dependency."
+  },
+  {
+    "q": "\"Inversion of Control\" đảo ngược điều gì?",
+    "options": [
+      "Thứ tự chạy các method trong class từ dưới lên trên",
+      "Ai tạo và lắp các object: container thay vì chính class",
+      "Luồng dữ liệu đi từ database lên controller, không ngược lại"
+    ],
+    "answer": 1,
+    "why": "Quyền tạo và lắp ráp dependency chuyển từ class sang container. DI là cách cụ thể để làm việc đó: class chỉ khai báo thứ nó cần qua constructor."
+  },
+  {
+    "q": "Bỏ <code>@Component</code> khỏi <code>ConsoleEmailSender</code>, app báo <code>required a bean of type 'EmailSender' that could not be found</code>. Vì sao?",
+    "options": [
+      "Phải đánh dấu interface EmailSender bằng @Component thay vì class đó",
+      "Constructor của OrderService phải dùng @Autowired thì Spring mới chạy được",
+      "Spring không biết class đó nên không có bean để tiêm"
+    ],
+    "answer": 2,
+    "why": "Spring chỉ quản lý những class nó tìm thấy (có <code>@Component</code>). Không có bean nào kiểu <code>EmailSender</code> thì không có gì để tiêm. Còn <code>@Autowired</code> thì không bắt buộc khi class chỉ có một constructor. <a href='https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/autowired.html'>[docs]</a>"
+  },
+  {
+    "q": "Thêm <code>SmsSender</code> cũng có <code>@Component</code> và cũng <code>implements EmailSender</code>. Chuyện gì xảy ra khi chạy?",
+    "options": [
+      "Spring chọn bean được tạo trước, tức là bean ConsoleEmailSender",
+      "Spring lỗi vì không biết chọn bean nào trong hai",
+      "Spring tiêm cả hai và gửi qua email lẫn SMS"
+    ],
+    "answer": 1,
+    "why": "Constructor cần <em>một</em> <code>EmailSender</code> nhưng container có hai bean khớp, nên Spring dừng lại: <code>required a single bean, but 2 were found</code>."
+  },
+  {
+    "q": "Trong Spring, <strong>bean</strong> là gì?",
+    "options": [
+      "Một class Java bất kỳ có getter, setter và constructor rỗng",
+      "Một file cấu hình XML mô tả cách kết nối database",
+      "Một object do Spring container tạo, lắp ráp và quản lý"
+    ],
+    "answer": 2,
+    "why": "Định nghĩa trong docs: bean là object được container khởi tạo, lắp ráp và quản lý. Đáp án đầu là \"JavaBean\", một khái niệm khác, rất dễ nhầm với bean của Spring."
+  }
+]
+</script>
+
+<h2>6 · Thử thách</h2>
+<p>Gõ vào chat với teacher (Claude), bằng lời của bạn và không nhìn lại bài:</p>
+<ol>
+  <li>DI và IoC khác nhau thế nào? (2–3 câu)</li>
+  <li>Khi gặp lỗi <code>required a bean of type ... that could not be found</code>, bạn sẽ kiểm tra những gì?</li>
+</ol>
+<p>Mình sẽ chấm và chỉ ra chỗ còn hổng trước khi sang bài 2.</p>
+
+<hr>
+
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://docs.spring.io/spring-framework/reference/core/beans/introduction.html">Spring Framework Reference: Introduction to the Spring IoC Container and Beans</a>. Chỉ khoảng 2 đoạn văn, nhưng đó là định nghĩa gốc do chính team Spring viết. Sau bài này bạn đã đủ nền để đọc hiểu.</p>
+<p>Tra nhanh: <a href="../reference/ioc-di.html">Cheat sheet: IoC, DI &amp; Bean</a>.</p>
+
+<p class="ask">Chỗ nào chưa rõ, kể cả câu "ngớ ngẩn" nhất, cứ hỏi teacher (Claude) trong chat. Ví dụ: "interface để làm gì, sao không truyền thẳng ConsoleEmailSender?", hay "Spring tìm thấy class bằng cách nào?"</p>
+
+<div class="footer-nav no-print">
+  <span>← (bài đầu tiên)</span>
+  <a href="0002-chon-bean-primary-qualifier.html">Bài 2: Chọn bean khi có nhiều ứng viên →</a>
+</div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

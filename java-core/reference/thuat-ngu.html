@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thuật ngữ Java Core</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Java Core · Reference · <a href="bo-nho-stack-heap.html">Cheat sheet bộ nhớ</a></nav>
+<h1>Thuật ngữ</h1>
+<p class="subtitle">Mọi bài học đều dùng đúng các từ dưới đây. Mỗi thuật ngữ có nguồn chuẩn đi kèm.</p>
+
+<div class="table-wrap"><table>
+<tr><th>Thuật ngữ</th><th>Nghĩa</th><th>Nguồn · Bài</th></tr>
+<tr><td><strong>JVM stack</strong></td><td>Vùng nhớ riêng của mỗi thread, chứa các frame. Stack quá sâu (ví dụ đệ quy vô hạn) sẽ gây <code>StackOverflowError</code>.</td><td><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5.2">JVMS §2.5.2</a> · <a href="../lessons/0001-stack-heap-va-tham-chieu.html">B1</a></td></tr>
+<tr><td><strong>Frame</strong></td><td>Được tạo ra mỗi lần gọi method và huỷ khi method kết thúc. Chứa biến local, tham số và operand stack.</td><td><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.6">JVMS §2.6</a> · B1</td></tr>
+<tr><td><strong>Biến local</strong></td><td>Biến khai báo trong method, kể cả tham số. Nằm trong frame.</td><td><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.6.1">JVMS §2.6.1</a> · B1</td></tr>
+<tr><td><strong>Heap</strong></td><td>Vùng nhớ dùng chung cho mọi thread, nơi cấp phát mọi object và mảng. Do GC quản lý.</td><td><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5.3">JVMS §2.5.3</a> · B1</td></tr>
+<tr><td><strong>Object</strong></td><td>Instance của một class, hoặc một mảng. Luôn nằm trên heap theo mô hình của spec.</td><td><a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.3.1">JLS §4.3.1</a> · B1</td></tr>
+<tr><td><strong>Primitive type</strong></td><td>8 kiểu: <code>byte short int long float double char boolean</code>. Biến chứa trực tiếp giá trị.</td><td><a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.2">JLS §4.2</a> · B1</td></tr>
+<tr><td><strong>Reference type</strong></td><td>Class, interface, mảng, type variable. Biến chứa giá trị tham chiếu hoặc <code>null</code>.</td><td><a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.3">JLS §4.3</a> · B1</td></tr>
+<tr><td><strong>Giá trị tham chiếu</strong> (reference)</td><td>“Con trỏ” tới một object. Java không cho làm phép toán số học trên nó như trong C.</td><td><a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.3.1">JLS §4.3.1</a> · B1</td></tr>
+<tr><td><strong>Pass-by-value</strong></td><td>Khi gọi method, giá trị của đối số được copy vào một biến tham số mới. Java <em>chỉ</em> có cơ chế này.</td><td><a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.4.1">JLS §8.4.1</a> · B1</td></tr>
+<tr><td><strong>Garbage collector (GC)</strong></td><td>Cơ chế tự động thu hồi object trên heap khi không còn được tham chiếu tới. Object không bao giờ bị giải phóng thủ công.</td><td><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5.3">JVMS §2.5.3</a> · B1</td></tr>
+<tr><td><strong>Intern / String pool</strong></td><td>Cơ chế dùng chung một instance String cho các literal và biểu thức hằng giống nhau.</td><td><a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-3.html#jls-3.10.5">JLS §3.10.5</a> · <a href="../lessons/0002-so-sanh-bang-va-equals.html">B2</a></td></tr>
+<tr><td><strong>Biểu thức hằng</strong> (constant expression)</td><td>Biểu thức compiler tính được ngay lúc compile, ví dụ <code>"h" + "i"</code> hoặc phép toán trên constant variable.</td><td><a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.29">JLS §15.29</a> · B2, B5</td></tr>
+<tr><td><strong>Boxing / Integer cache</strong></td><td>Tự đổi primitive sang wrapper. Các giá trị −128..127 luôn dùng chung object.</td><td><a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-5.html#jls-5.1.7">JLS §5.1.7</a> · B2</td></tr>
+<tr><td><strong>Hợp đồng equals/hashCode</strong></td><td>equals bằng nhau ⇒ hashCode bằng nhau. Chiều ngược lại không bắt buộc.</td><td><a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html#hashCode()">Object Javadoc</a> · <a href="../lessons/0003-hop-dong-equals-hashcode.html">B3</a></td></tr>
+<tr><td><strong>Collision</strong></td><td>Hai key khác nhau rơi vào cùng bucket (do cùng hash, hoặc khác hash nhưng cùng chỉ số).</td><td>B3, B4</td></tr>
+<tr><td><strong>Bucket</strong></td><td>Một ô trong mảng <code>table</code> của HashMap, chứa linked list hoặc cây các node.</td><td><a href="https://github.com/openjdk/jdk21u/blob/master/src/java.base/share/classes/java/util/HashMap.java">HashMap.java</a> · <a href="../lessons/0004-hashmap-ben-trong.html">B4</a></td></tr>
+<tr><td><strong>Load factor / threshold</strong></td><td>Ngưỡng đầy (mặc định 0.75). Khi size vượt capacity × load factor thì bảng gấp đôi.</td><td>B4</td></tr>
+<tr><td><strong>Treeify</strong></td><td>Chuyển bucket từ list sang cây đỏ-đen khi có ≥ 8 node và bảng ≥ 64 ô.</td><td>B4</td></tr>
+<tr><td><strong>Bytecode / instruction</strong></td><td>Lệnh của JVM trong file .class, xem được bằng <code>javap -c</code>.</td><td><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-6.html">JVMS ch.6</a> · <a href="../lessons/0005-doc-bytecode-voi-javap.html">B5</a></td></tr>
+<tr><td><strong>Operand stack</strong></td><td>“Bàn nháp” của frame: instruction đẩy giá trị lên, lấy ra để tính, rồi đẩy kết quả lại.</td><td><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.6.2">JVMS §2.6.2</a> · B5</td></tr>
+<tr><td><strong>Local variable slot</strong></td><td>Vị trí đánh số 0, 1, 2… của biến local trong frame. Slot 0 là <code>this</code> nếu là method instance.</td><td><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.6.1">JVMS §2.6.1</a> · B5</td></tr>
+<tr><td><strong>Reachable</strong></td><td>Còn đi tới được từ một thread đang sống. Object không reachable là rác.</td><td><a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-12.html#jls-12.6.1">JLS §12.6.1</a> · <a href="../lessons/0006-garbage-collection.html">B6</a></td></tr>
+<tr><td><strong>GC roots</strong></td><td>Điểm xuất phát khi GC đánh dấu: biến local trong các frame đang sống, field static…</td><td>B6</td></tr>
+<tr><td><strong>Young / old generation</strong></td><td>Vùng cho object mới (eden + survivor) và vùng cho object sống lâu.</td><td><a href="https://docs.oracle.com/en/java/javase/21/gctuning/garbage-first-g1-garbage-collector1.html">G1 guide</a> · B6</td></tr>
+<tr><td><strong>Memory leak (Java)</strong></td><td>Object không còn cần nhưng vẫn reachable, nên GC không được thu hồi.</td><td>B6</td></tr>
+</table></div>
+</main>
+</body>
+</html>

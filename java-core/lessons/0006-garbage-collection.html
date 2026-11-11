@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 6 · Garbage Collection</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../reference/lo-trinh.html">Lộ trình</a> · Bài 6 · <a href="0005-doc-bytecode-voi-javap.html">← Bài 5</a> · <a href="../reference/thuat-ngu.html">Thuật ngữ</a></nav>
+
+<h1>Khi nào một object “chết”?</h1>
+<p class="subtitle">Reachability, GC roots, generational GC với G1, và vì sao Java có GC mà vẫn bị memory leak.</p>
+
+<div class="goal">
+  <strong>Sau bài này bạn sẽ</strong>
+  Giải thích được GC quyết định object nào là rác, đọc được một dòng log <code>-Xlog:gc</code>, và chỉ ra memory leak trong một đoạn code Java.
+</div>
+
+<details class="recall">
+  <summary>Ôn lại Bài 1, 3 và 5</summary>
+  <p>(1) Khi <code>replace()</code> ở Bài 1 kết thúc, object “Bình” ra sao? (2) Vì sao key thay đổi được trong HashSet là một dạng leak? (3) <code>iadd</code> lấy toán hạng từ đâu?</p>
+  <p><em>Đáp án:</em> (1) Không còn ai trỏ tới nên trở thành rác. Bài này sẽ gọi đúng tên: unreachable. (2) Object vẫn nằm trong set nhưng không ai tìm thấy hay xoá được. (3) Từ operand stack của frame.</p>
+</details>
+
+<h2>1. Rác = không còn đường đi tới</h2>
+<p>GC <em>không</em> hỏi “object này còn được dùng không?”. Nó chỉ hỏi “object này còn <strong>đi tới được</strong> không?”.</p>
+<blockquote class="spec">
+  “A reachable object is any object that can be accessed in any potential continuing computation from any live thread.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-12.html#jls-12.6.1">JLS §12.6.1</a></cite>
+</blockquote>
+<blockquote class="spec">
+  “An object is considered garbage and its memory can be reused by the VM when it can no longer be reached from any reference of any other live object in the running program.”
+  <cite>— <a href="https://docs.oracle.com/en/java/javase/17/gctuning/garbage-collector-implementation.html">HotSpot GC Tuning Guide: Garbage Collector Implementation</a></cite>
+</blockquote>
+<p>Trên thực tế, GC bắt đầu từ một tập điểm xuất phát, thường gọi là <strong>GC roots</strong>, rồi lần theo mọi mũi tên. Hai loại root quan trọng nhất bạn đã biết từ Bài 1:</p>
+<ul>
+  <li><strong>Biến local và tham số</strong> trong frame của các thread đang sống.</li>
+  <li><strong>Field <code>static</code></strong> của các class đã load.</li>
+</ul>
+<p>Object nào không được đánh dấu sau khi lần hết các mũi tên thì là rác.</p>
+
+<figure>
+<svg viewBox="0 0 640 230" role="img" aria-labelledby="d6t">
+  <title id="d6t">GC roots gồm biến local và field static trỏ tới các object reachable; một cụm hai object trỏ lẫn nhau nhưng không có root nào trỏ tới là rác</title>
+  <defs><marker id="ah6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+  <rect class="region-stack" x="10" y="10" width="170" height="210" rx="8"/>
+  <text class="label stack-t" x="24" y="34">GC roots</text>
+  <rect class="frame" x="25" y="50" width="140" height="44" rx="4"/><text x="37" y="77">local: order</text>
+  <rect class="frame" x="25" y="130" width="140" height="44" rx="4"/><text x="37" y="157">static CACHE</text>
+  <rect class="region-heap" x="230" y="10" width="400" height="210" rx="8"/>
+  <text class="label heap-t" x="244" y="34">HEAP</text>
+  <rect class="obj" x="260" y="50" width="100" height="40" rx="4"/><text x="280" y="75">Order</text>
+  <rect class="obj" x="400" y="50" width="100" height="40" rx="4"/><text x="420" y="75">Item</text>
+  <rect class="obj" x="260" y="130" width="100" height="40" rx="4"/><text x="280" y="155">ArrayList</text>
+  <rect x="440" y="140" width="80" height="36" rx="4" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/><text class="muted-t" x="458" y="163">A</text>
+  <rect x="540" y="140" width="80" height="36" rx="4" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/><text class="muted-t" x="558" y="163">B</text>
+  <path class="arrow" d="M165,72 L258,70" marker-end="url(#ah6)"/>
+  <path class="arrow" d="M360,70 L398,70" marker-end="url(#ah6)"/>
+  <path class="arrow" d="M165,152 L258,150" marker-end="url(#ah6)"/>
+  <path class="arrow dead" d="M520,152 L538,152"/><path class="arrow dead" d="M540,168 L520,168"/>
+  <text class="muted-t" x="440" y="205">A ⇄ B trỏ nhau, nhưng không root nào tới ⇒ rác</text>
+</svg>
+<figcaption>Hình 6. Object được giữ lại vì <em>có đường đi từ root</em>, không phải vì có ai đó trỏ tới nó. Vì vậy hai object trỏ vòng vào nhau vẫn bị thu hồi. Đây là điểm khác cơ bản so với cơ chế đếm tham chiếu (reference counting).</figcaption>
+</figure>
+
+<p>Và object thì không bao giờ được giải phóng thủ công. <code>System.gc()</code> cũng chỉ là lời <em>gợi ý</em>:</p>
+<blockquote class="spec">
+  “Calling this method suggests that the Java Virtual Machine expend effort toward recycling unused objects…”
+  <cite>— <a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Runtime.html#gc()">Runtime.gc — Javadoc Java 21</a></cite>
+</blockquote>
+
+<h2>2. Vì sao chia “thế hệ”: đa số object chết trẻ</h2>
+<blockquote class="spec">
+  “The most important of these observed properties is the weak generational hypothesis, which states that most objects survive for only a short period of time.”
+  <cite>— <a href="https://docs.oracle.com/en/java/javase/17/gctuning/garbage-collector-implementation.html">HotSpot GC Tuning Guide</a></cite>
+</blockquote>
+<p>Vì đa số object chết trẻ, heap được chia làm <strong>young generation</strong> (gồm eden và survivor) và <strong>old generation</strong>. Object mới được cấp phát trong eden. Khi eden đầy, GC chạy một <em>young collection</em>: chỉ quét vùng nhỏ này, sao chép những object còn sống sang survivor, rồi coi cả eden là trống. Việc này rất rẻ vì hầu như mọi thứ trong eden đã chết. Object sống sót qua nhiều lần như vậy sẽ được “thăng cấp” lên old generation.</p>
+<p>Từ Java 9, collector mặc định là <strong>G1</strong> (“G1 is the default collector”, theo <a href="https://docs.oracle.com/en/java/javase/21/gctuning/garbage-first-g1-garbage-collector1.html">G1 guide</a>). G1 chia heap thành nhiều <em>region</em> bằng nhau, và mỗi region được gán vai trò eden, survivor hoặc old. Trên máy bạn, <code>java -XX:+PrintCommandLineFlags -version</code> in ra <code>-XX:+UseG1GC</code>.</p>
+
+<h3>Đọc một dòng log GC (chạy thật)</h3>
+<pre><code>[0.486s][info][gc] GC(3) Pause Young (Normal) (G1 Evacuation Pause) 11M-&gt;3M(17M) 0.379ms
+                   │     │                                           │    │  │      └ thời gian dừng app
+                   │     └ loại: young collection                    │    │  └ heap hiện có
+                   └ lần GC thứ 3                                    │    └ sau GC
+                                                                     └ trước GC</code></pre>
+<p>Vòng lặp tạo 200 MB mảng <code>byte[100]</code> chết ngay, mà mỗi lần young GC chỉ dừng chương trình chưa tới 1 ms (11M xuống 3M). Đó chính là giả thuyết thế hệ đang hoạt động.</p>
+
+<h2>3. Memory leak trong Java</h2>
+<div class="box key"><p>Trong Java, memory leak <strong>không</strong> phải là “quên free” như trong C. Nó là: <strong>object không còn cần nữa nhưng vẫn reachable</strong>, nên GC không được phép thu hồi.</p></div>
+<pre><code>static final List&lt;byte[]&gt; CACHE = new ArrayList&lt;&gt;();   // static field = GC root
+for (;;) CACHE.add(new byte[1_000_000]);              // thêm mãi, không bao giờ xoá
+// ⇒ OutOfMemoryError sau khi giữ ~60 MB (heap -Xmx64m), chạy thật</code></pre>
+<p>Log lúc này cho thấy GC đã cố hết sức nhưng không thu hồi được gì: <code>Pause Full (G1 Compaction Pause) 63M-&gt;63M(64M)</code>. Các nguồn leak hay gặp:</p>
+<ul>
+  <li>Collection <code>static</code> hoặc cache chỉ thêm mà không bao giờ xoá.</li>
+  <li>Key thay đổi được trong HashMap/HashSet (<a href="0003-hop-dong-equals-hashcode.html">Bài 3</a>).</li>
+  <li>Listener hoặc callback đăng ký mà không huỷ đăng ký.</li>
+  <li><code>ThreadLocal</code> không gọi <code>remove()</code> trong thread pool (sẽ học ở phần concurrency).</li>
+</ul>
+<span class="sidenote">Trong log demo bạn sẽ thấy chữ “Humongous Allocation”. Với G1, object có kích thước từ nửa region trở lên được gọi là <em>humongous</em> và được cấp phát thẳng vào old generation (<a href="https://docs.oracle.com/en/java/javase/21/gctuning/garbage-first-g1-garbage-collector1.html">G1 guide</a>). Heap 64 MB có region nhỏ, nên mảng 1 MB đã thuộc loại này.</span>
+
+<h2>4. Luyện tập</h2>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q1 (ôn Bài 5). <code>iadd</code> lấy hai toán hạng từ đâu?</p>
+  <div class="opts"><button>local variables của frame</button><button>operand stack của frame</button></div>
+  <div class="explain">JVM là máy stack: <code>iload</code> đẩy lên operand stack, <code>iadd</code> lấy ra từ đó, cộng, rồi đẩy kết quả lại.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q2. Object đủ điều kiện bị GC thu hồi khi nào?</p>
+  <div class="opts"><button>không còn reachable từ root</button><button>method tạo nó kết thúc</button><button>sống quá lâu trên heap</button></div>
+  <div class="explain">Chỉ có reachability quyết định. Object tạo trong method vẫn sống tiếp nếu được return ra ngoài hoặc được cất vào một field.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q3. <code>System.gc()</code> làm gì?</p>
+  <div class="opts"><button>bắt buộc chạy GC ngay</button><button>gợi ý nên chạy GC</button></div>
+  <div class="explain">Javadoc dùng đúng chữ “suggests”. JVM được phép bỏ qua, và cờ <code>-XX:+DisableExplicitGC</code> còn tắt hẳn nó.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q4. Vì sao heap được chia thành young và old generation?</p>
+  <div class="opts"><button>đa số object chết trẻ</button><button>object lớn cần chỗ riêng</button></div>
+  <div class="explain">Weak generational hypothesis: quét riêng vùng young, nơi gần như mọi thứ đã chết, nên rất rẻ.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q5. Memory leak trong Java nghĩa là:</p>
+  <div class="opts"><button>object hết reachable nhưng chưa thu</button><button>object vô dụng nhưng còn reachable</button></div>
+  <div class="explain">Object hết reachable thì <em>sớm muộn</em> sẽ được thu hồi; đó không phải leak. Leak là khi bạn vô tình vẫn giữ mũi tên tới thứ không còn cần.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q6. Hai object A và B trỏ vào nhau, nhưng không root nào đi tới được chúng. GC làm gì?</p>
+  <div class="opts"><button>giữ lại vì còn tham chiếu</button><button>thu hồi cả hai object</button></div>
+  <div class="explain">GC đánh dấu từ root. Tham chiếu vòng giữa hai object không làm chúng reachable.</div>
+</div>
+
+<div class="quiz-score"></div>
+
+<h2>5. Chạy thử</h2>
+<pre><code>java -Xmx64m -Xlog:gc lessons/code/L0006Gc.java</code></pre>
+<p>(<a href="code/L0006Gc.java">mở file</a>) Thử thêm: thay <code>CACHE.add(...)</code> bằng một biến local <code>byte[] b = new byte[1_000_000];</code> trong vòng lặp. Còn <code>OutOfMemoryError</code> không? Vì sao?</p>
+
+<hr>
+<div class="box key"><p><strong>Nguồn chính nên đọc:</strong> <a href="https://docs.oracle.com/en/java/javase/21/gctuning/garbage-first-g1-garbage-collector1.html">HotSpot GC Tuning Guide: G1 Garbage Collector</a>. Đọc mục “Basic Concepts” và “Heap Layout”, kèm hình minh họa các region.</p></div>
+<p class="next"><strong>Cheat sheet:</strong> <a href="../reference/bytecode-va-gc.html">Bytecode &amp; GC</a> · <a href="../reference/lo-trinh.html">Lộ trình</a><br><strong>Tiếp theo:</strong> mình sẽ soạn tiếp dựa trên kết quả quiz của bạn (dự kiến: String immutability, rồi thread và Java Memory Model).</p>
+<p class="ask">Câu hỏi như “G1 khác ZGC ở đâu?” hay “làm sao tìm leak bằng heap dump?” rất đáng hỏi, cứ hỏi mình trong terminal. Làm xong quiz thì báo kết quả nhé.</p>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

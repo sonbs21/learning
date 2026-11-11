@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REST API đầu tiên</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>REST API đầu tiên</h1>
+<p class="subtitle">Bài 6 · <code>@RestController</code>, GET/POST, <code>@PathVariable</code>, <code>@RequestBody</code> và JSON</p>
+<div class="meta"><span>~50 phút</span><span>Cần: <a href="0005-cau-hinh-properties-profile.html">Bài 5</a></span><span>Lab: <code>./lab</code> + <code>curl</code></span></div>
+
+<p>Đây là việc chính của một backend engineer: nhận HTTP request từ app mobile hoặc web, xử lý, rồi trả về JSON. Bạn sẽ thấy mọi thứ đã học ở bài 1–5 đều có mặt ở đây: controller là một bean, service được tiêm qua constructor, và mọi request dùng chung bean singleton.</p>
+
+<h2>1 · Một request đi qua những đâu?</h2>
+<ol class="flow">
+  <li>Client gửi <code>GET http://localhost:8080/products/1</code>.</li>
+  <li><strong>Tomcat</strong>, web server được Spring Boot nhúng sẵn trong app, nhận request trên port 8080.</li>
+  <li>Spring MVC tìm method có đường dẫn khớp: <code>@GetMapping("/{id}")</code> trong class <code>@RequestMapping("/products")</code>.</li>
+  <li>Spring chuyển <code>"1"</code> trong URL thành <code>Long id</code> nhờ <code>@PathVariable</code>.</li>
+  <li>Method trả về một object <code>Product</code>. Thư viện <strong>Jackson</strong>, được Spring Boot cấu hình sẵn, chuyển object đó thành JSON để gửi về client.</li>
+</ol>
+<p><code>@RestController</code> = <code>@Controller</code> + "giá trị trả về chính là nội dung response". Nó cũng là một <code>@Component</code>, nên cũng là một bean. <a class="cite" href="https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann.html">[docs]</a></p>
+
+<table>
+  <tr><th>Annotation</th><th>Lấy dữ liệu từ đâu</th><th>Ví dụ</th></tr>
+  <tr><td><code>@PathVariable</code></td><td>Một phần của đường dẫn</td><td><code>/products/<strong>1</strong></code></td></tr>
+  <tr><td><code>@RequestParam</code></td><td>Query string</td><td><code>/products?<strong>page=2</strong></code></td></tr>
+  <tr><td><code>@RequestBody</code></td><td>Body JSON của request</td><td><code>{"name":"Áo thun"}</code></td></tr>
+</table>
+
+<hr>
+
+<h2>2 · Thực hành</h2>
+<div class="lab">
+<h3>Lab 6 · ~35 phút</h3>
+<ol>
+  <li><strong>Bật web server.</strong> Mở <code>application.properties</code> và <strong>xoá</strong> hai dòng:
+<pre><code># Tạm tắt web server cho các bài đầu (chưa học REST API)
+spring.main.web-application-type=none</code></pre></li>
+
+  <li><code>Product.java</code>: dữ liệu sản phẩm
+<pre><code>package dev.lab;
+
+public record Product(Long id, String name, long price) {
+}</code></pre></li>
+
+  <li><code>ProductService.java</code>: lưu tạm trong bộ nhớ (chưa có database)
+<pre><code>package dev.lab;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+import org.springframework.stereotype.Service;
+
+@Service
+public class ProductService {
+
+    // ProductService là singleton: mọi request dùng chung map này, nên phải dùng kiểu an toàn đa luồng
+    private final Map&lt;Long, Product&gt; products = new ConcurrentHashMap&lt;&gt;();
+    private final AtomicLong nextId = new AtomicLong(1);
+
+    public List&lt;Product&gt; findAll() {
+        return List.copyOf(products.values());
+    }
+
+    public Optional&lt;Product&gt; findById(Long id) {
+        return Optional.ofNullable(products.get(id));
+    }
+
+    public Product create(String name, long price) {
+        Product product = new Product(nextId.getAndIncrement(), name, price);
+        products.put(product.id(), product);
+        return product;
+    }
+}</code></pre></li>
+
+  <li><code>ProductController.java</code>
+<pre><code>package dev.lab;
+
+import java.util.List;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+@RestController
+@RequestMapping("/products")
+public class ProductController {
+
+    private final ProductService productService;
+
+    public ProductController(ProductService productService) {
+        this.productService = productService;
+    }
+
+    @GetMapping
+    public List&lt;Product&gt; findAll() {
+        return productService.findAll();
+    }
+
+    @GetMapping("/{id}")
+    public Product findById(@PathVariable Long id) {
+        return productService.findById(id)
+                .orElseThrow(() -&gt; new ResponseStatusException(HttpStatus.NOT_FOUND));
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public Product create(@RequestBody Product request) {
+        return productService.create(request.name(), request.price());
+    }
+}</code></pre></li>
+
+  <li><strong>Chạy server</strong> ở một terminal: <code>mvn -o -q spring-boot:run</code>. Lần này app <em>không tự thoát</em>, vì nó đang chờ request. Tìm dòng log <code>Tomcat started on port 8080</code>. Khi cần tắt thì bấm <code>Ctrl+C</code>.</li>
+
+  <li><strong>Gọi API</strong> từ một terminal khác. Với mỗi lệnh, hãy <strong>đoán status code trước</strong> rồi mới chạy:
+<pre><code>curl -i http://localhost:8080/products
+curl -i -X POST http://localhost:8080/products \
+     -H 'Content-Type: application/json' -d '{"name":"Áo thun","price":150000}'
+curl -i -X POST http://localhost:8080/products \
+     -H 'Content-Type: application/json' -d '{"name":"Quần jean","price":450000}'
+curl -i http://localhost:8080/products
+curl -i http://localhost:8080/products/1
+curl -i http://localhost:8080/products/99
+curl -i http://localhost:8080/products/abc</code></pre></li>
+
+  <li><strong>Tắt server rồi bật lại</strong>, sau đó gọi lại <code>GET /products</code>. Hai sản phẩm vừa tạo còn không? Vì sao?</li>
+</ol>
+
+<details>
+  <summary>Kết quả mong đợi</summary>
+<pre><code>GET  /products        → 200  []
+POST /products        → <span class="hl">201</span>  {"id":1,"name":"Áo thun","price":150000}
+POST /products        → 201  {"id":2,"name":"Quần jean","price":450000}
+GET  /products        → 200  [{"id":1,...},{"id":2,...}]
+GET  /products/1      → 200  {"id":1,"name":"Áo thun","price":150000}
+GET  /products/99     → <span class="bad-hl">404</span>  {"timestamp":"...","status":404,"error":"Not Found","path":"/products/99"}
+GET  /products/abc    → <span class="bad-hl">400</span>  {"timestamp":"...","status":400,"error":"Bad Request","path":"/products/abc"}</code></pre>
+  <ul>
+    <li><strong>404</strong> là do code của bạn ném <code>ResponseStatusException(NOT_FOUND)</code>. Body JSON đó là trang lỗi mặc định của Spring Boot.</li>
+    <li><strong>400</strong> xảy ra trước khi method của bạn được gọi: Spring không chuyển được <code>"abc"</code> thành <code>Long</code>.</li>
+    <li>Sau khi khởi động lại, danh sách sản phẩm <strong>trống</strong>, vì dữ liệu chỉ nằm trong RAM của bean <code>ProductService</code>. Đó là lý do ta cần database, chủ đề của các bài tới.</li>
+    <li>Bạn không viết dòng nào để chuyển object thành JSON. Spring Boot đã tự cấu hình Jackson khi thấy thư viện đó trên classpath. Đây chính là <em>auto-configuration</em>, và ta sẽ mổ xẻ nó trong một bài sau.</li>
+  </ul>
+</details>
+</div>
+
+<hr>
+
+<h2>3 · Kiểm tra trí nhớ</h2>
+<div class="quiz" data-quiz="q6"></div>
+<script type="application/json" id="q6">
+[
+  {
+    "q": "Method trả về một <code>Product</code> (record), vậy mà client nhận được JSON. Vì sao?",
+    "options": [
+      "Record trong Java luôn tự có method toJson khi biên dịch",
+      "Tomcat đọc các field của object rồi tự ghép thành chuỗi",
+      "Spring Boot tự cấu hình Jackson để chuyển object thành JSON"
+    ],
+    "answer": 2,
+    "why": "Jackson có sẵn trong <code>spring-boot-starter-web</code>, và Spring Boot tự cấu hình nó để chuyển giá trị trả về của <code>@RestController</code> thành JSON."
+  },
+  {
+    "q": "<code>GET /products/abc</code> trả về <code>400 Bad Request</code>. Vì sao?",
+    "options": [
+      "Không đổi được chữ abc thành kiểu Long của @PathVariable",
+      "Sản phẩm có id abc chưa được tạo trong service",
+      "Đường dẫn chứa chữ cái nên Tomcat từ chối request"
+    ],
+    "answer": 0,
+    "why": "Lỗi chuyển kiểu xảy ra trước khi method của bạn được gọi. Không tìm thấy sản phẩm thì sẽ là 404, như với <code>/products/99</code>."
+  },
+  {
+    "q": "<code>POST /products</code> trả về mã nào, và nhờ đâu?",
+    "options": [
+      "200 OK, vì đó là mã mặc định của Spring",
+      "201 Created, nhờ có @ResponseStatus(HttpStatus.CREATED) gắn ở trên method create",
+      "201 Created, vì Spring tự nhận ra method dùng @PostMapping"
+    ],
+    "answer": 1,
+    "why": "Mặc định là 200. Ta chủ động đổi thành 201 bằng <code>@ResponseStatus</code>, vì đó là mã đúng nghĩa khi tạo mới tài nguyên."
+  },
+  {
+    "q": "<code>ProductService</code> là singleton và có nhiều request đến cùng lúc. Vì sao dùng <code>ConcurrentHashMap</code> thay vì <code>HashMap</code>?",
+    "options": [
+      "Spring bắt buộc mọi field trong @Service phải là kiểu concurrent an toàn",
+      "Mọi request dùng chung một object, nên map phải an toàn đa luồng",
+      "ConcurrentHashMap luôn nhanh hơn HashMap trong mọi trường hợp sử dụng thông thường"
+    ],
+    "answer": 1,
+    "why": "Đây là bài 4 áp dụng vào thực tế: bean singleton được nhiều thread dùng cùng lúc, nên trạng thái dùng chung phải an toàn đa luồng."
+  }
+]
+</script>
+
+<h2>4 · Thử thách</h2>
+<ol>
+  <li>Tự thêm endpoint <code>DELETE /products/{id}</code>: trả về <code>204 No Content</code> khi xoá được, và <code>404</code> khi không có sản phẩm. Gửi code vào chat để teacher (Claude) review.</li>
+  <li>Thêm <code>GET /products?maxPrice=200000</code> để lọc theo giá, dùng <code>@RequestParam(required = false)</code>.</li>
+  <li><em>Ôn bài 5:</em> làm sao chạy app ở port 9090 mà không sửa file nào?</li>
+</ol>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://spring.io/guides/gs/rest-service">Spring Guide: Building a RESTful Web Service</a>. Đây là hướng dẫn chính thức, khoảng 15 phút, và bạn sẽ thấy nó giống hệt những gì vừa làm.</p>
+<p>Tra nhanh: <a href="../reference/rest.html">Cheat sheet: REST với Spring MVC</a>.</p>
+<p class="ask">Có gì chưa rõ thì cứ hỏi teacher (Claude). Ví dụ: "Tomcat có bao nhiêu thread để xử lý request?", hay "Sao không trả về ResponseEntity?"</p>
+
+<div class="footer-nav no-print">
+  <a href="0005-cau-hinh-properties-profile.html">← Bài 5: Cấu hình &amp; profile</a>
+  <span>Bài 7: sắp có →</span>
+</div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

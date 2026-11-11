@@ -1,0 +1,5 @@
+# Tạo alarm cho dead-letter queue bằng Amazon CloudWatch (Creating alarms for dead-letter queues using Amazon CloudWatch)
+
+> Nguồn: [Creating alarms for dead-letter queues using Amazon CloudWatch](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/dead-letter-queues-alarms-cloudwatch.html)
+
+Thiết lập một CloudWatch alarm để giám sát các message trong dead-letter queue bằng metric [`ApproximateNumberOfMessagesVisible`](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-available-cloudwatch-metrics.html). Để xem hướng dẫn chi tiết, xem [Creating CloudWatch alarms for Amazon SQS metrics](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/set-cloudwatch-alarms-for-metrics.html). Khi alarm được kích hoạt (trigger), cho biết có message đã bị chuyển vào dead-letter queue, bạn có thể [poll](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-short-and-long-polling.html) queue để xem xét và truy xuất chúng.

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kẻ thù là round-trip</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Redis · Bài 2 · <a href="0001-mot-luong-xu-ly-tat-ca.html">← Bài 1</a> · <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></nav>
+
+<h1>Kẻ thù là round-trip</h1>
+<p class="subtitle">Redis chạy một lệnh mất chưa tới một micro-giây. Thứ làm app của bạn chậm gần như luôn là đường mạng. ~15 phút.</p>
+
+<div class="box goal">
+  <span class="label">Sau bài này bạn sẽ</span>
+  Đo được throughput tăng <strong>gấp ~8–10 lần</strong> nhờ pipelining trên chính máy bạn, và nhận ra được lỗi "N+1 với Redis", một lỗi rất hay gặp trên production.
+</div>
+
+<h2>1. Một lệnh tốn thời gian ở đâu?</h2>
+
+<p>Ở <a href="0001-mot-luong-xu-ly-tat-ca.html">bài 1</a>, bạn đã biết luồng chính chạy lệnh rất nhanh. Nhưng nhìn từ phía app, mỗi lệnh phải đi trọn một vòng: gửi qua mạng, xếp hàng, thực thi, rồi gửi kết quả về. Khoảng thời gian một vòng đi và về đó gọi là <strong>RTT</strong> (round-trip time).</p>
+
+<figure>
+<svg viewBox="0 0 640 150" role="img" aria-label="So sánh: không pipeline mỗi lệnh chờ một RTT; có pipeline nhiều lệnh dùng chung một RTT">
+  <style>
+    .t{font:12px system-ui,sans-serif;fill:var(--fg)} .m{font:11px system-ui,sans-serif;fill:var(--muted)}
+    .net{fill:none;stroke:var(--muted);stroke-width:1.2} .ex{fill:var(--accent)}
+  </style>
+  <text class="t" x="10" y="22">Không pipeline: 3 lệnh = 3 RTT</text>
+  <g transform="translate(10,32)">
+    <path class="net" d="M0,30 L40,0 L80,30"/><rect class="ex" x="38" y="0" width="4" height="6"/>
+    <path class="net" d="M80,30 L120,0 L160,30"/><rect class="ex" x="118" y="0" width="4" height="6"/>
+    <path class="net" d="M160,30 L200,0 L240,30"/><rect class="ex" x="198" y="0" width="4" height="6"/>
+    <text class="m" x="0" y="46">app</text><text class="m" x="250" y="10">Redis</text>
+  </g>
+  <text class="t" x="340" y="22">Pipeline: 3 lệnh = 1 RTT</text>
+  <g transform="translate(340,32)">
+    <path class="net" d="M0,30 L40,0 L92,30"/><path class="net" d="M6,30 L46,0"/><path class="net" d="M12,30 L52,0"/>
+    <rect class="ex" x="38" y="0" width="16" height="6"/>
+    <text class="m" x="0" y="46">app</text><text class="m" x="100" y="10">Redis</text>
+  </g>
+  <text class="m" x="10" y="110">Đường xiên = thời gian mạng. Vạch đỏ = thời gian Redis thực thi (rất nhỏ, đã vẽ phóng to).</text>
+  <text class="m" x="10" y="128">Thời gian chủ yếu nằm ở mạng, không nằm ở Redis.</text>
+</svg>
+<figcaption>Pipelining: gửi nhiều lệnh liền một lúc, không chờ từng kết quả, rồi đọc tất cả kết quả một lượt.</figcaption>
+</figure>
+
+<p>Tài liệu Redis đưa ví dụ cực đoan: với RTT 250 ms, một client chỉ gửi được <a href="https://redis.io/docs/latest/develop/using-commands/pipelining/">4 lệnh mỗi giây</a>, dù server xử lý được 100k lệnh/giây. Trong cùng một VPC, RTT nhỏ hơn rất nhiều, nhưng nguyên lý vẫn vậy: <em>số lần đi và về</em> quyết định tốc độ.</p>
+
+<h3>Pipelining còn giúp chính server</h3>
+<p>Mỗi lệnh gửi riêng lẻ khiến Redis tốn một lần <code>read()</code> và một lần <code>write()</code>, tức là các syscall chui xuống kernel. Khi pipeline, Redis đọc nhiều lệnh trong một <code>read()</code> và trả nhiều kết quả trong một <code>write()</code>, nên <a href="https://redis.io/docs/latest/develop/using-commands/pipelining/">throughput có thể tăng tới khoảng 10 lần</a>. Nghĩa là pipelining giảm tải cho luồng chính, chứ không chỉ tiết kiệm thời gian mạng.</p>
+
+<h3>Hai điều phải nhớ</h3>
+<ul>
+<li><strong>Pipeline không phải transaction.</strong> Lệnh của client khác vẫn có thể chen vào giữa các lệnh trong pipeline của bạn. Cần tính nguyên tử (atomic) thì dùng <code>MULTI</code>/Lua, sẽ học ở bài sau.</li>
+<li><strong>Đừng pipeline vô hạn.</strong> Server phải giữ toàn bộ kết quả trong RAM cho tới khi gửi xong. Docs khuyên chia thành <a href="https://redis.io/docs/latest/develop/using-commands/pipelining/">từng mẻ cỡ hợp lý, ví dụ 10k lệnh</a>.</li>
+</ul>
+
+<h2>2. Lab: đo bằng redis-benchmark (~5 phút)</h2>
+<ol class="steps">
+<li>Khởi động lại container của bài 1 nếu đã xoá:
+<pre><code>docker run -d --name redis-lab -p 6379:6379 redis:7.4 --enable-debug-command yes</code></pre></li>
+<li>Đo khi không pipeline (mặc định 50 client chạy song song):
+<pre><code>docker exec redis-lab redis-benchmark -q -t set,get -n 200000
+<span class="c">SET: ~200000 requests per second
+GET: ~200000 requests per second</span></code></pre></li>
+<li>Đo lại, mỗi client pipeline 16 lệnh một lần (<code>-P 16</code>):
+<pre><code>docker exec redis-lab redis-benchmark -q -t set,get -n 200000 -P 16
+<span class="c">SET: ~1700000 requests per second
+GET: ~2000000 requests per second</span></code></pre>
+Con số trên là kết quả đo thật khi soạn bài; máy bạn sẽ khác, nhưng tỷ lệ chênh lệch thường tương tự. Lưu ý benchmark chạy <em>bên trong</em> container nên RTT gần bằng 0. Mức tăng ở đây chủ yếu đến từ việc giảm syscall. Qua mạng thật, chênh lệch còn lớn hơn.</li>
+</ol>
+
+<h2>3. Trên production: lỗi N+1 với Redis</h2>
+<p>Trang danh sách hiển thị 100 sản phẩm, và code lấy cache cho từng sản phẩm:</p>
+<pre><code><span class="c">// ❌ 100 lần đi và về</span>
+for (String id : productIds) {
+    redisTemplate.opsForValue().get("product:" + id);
+}
+
+<span class="c">// ✅ 1 lần: MGET là một lệnh duy nhất</span>
+redisTemplate.opsForValue().multiGet(keys);
+
+<span class="c">// ✅ Nhiều loại lệnh khác nhau: pipeline (callback bắt buộc trả về null)</span>
+List&lt;Object&gt; results = redisTemplate.executePipelined(new SessionCallback&lt;Object&gt;() {
+    public Object execute(RedisOperations ops) {
+        for (String id : productIds) ops.opsForHash().entries("product:" + id);
+        return null;
+    }
+});</code></pre>
+<p class="note">API <code>executePipelined</code> theo <a href="https://docs.spring.io/spring-data/redis/reference/redis/pipelining.html">tài liệu Spring Data Redis</a>. Với Redis Cluster, Spring Data Redis chỉ hỗ trợ pipeline qua driver Lettuce (mặc định của Spring Boot).</p>
+
+<p><strong>Nối sang ElastiCache:</strong> app chạy trên ECS/EC2 khác AZ với node ElastiCache sẽ có RTT lớn hơn chạy cùng AZ. Lỗi N+1 nhân con số đó lên 100 lần. AWS cũng khuyên <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/WorkingWithRedis.html">tái sử dụng connection (connection pool)</a>, vì mở connection mới tốn cả thời gian lẫn CPU của cache.</p>
+
+<h2>4. Tự kiểm tra</h2>
+<p class="quiz-score">Điểm: 0/5</p>
+
+<div class="quiz" data-correct="2">
+  <p class="q">API gọi Redis 100 lần tuần tự, mỗi lần RTT 1 ms. Thời gian chờ Redis tối thiểu là bao nhiêu?</p>
+  <button>Khoảng 1 ms vì Redis rất nhanh</button>
+  <button>Khoảng 10 ms nhờ có I/O threads</button>
+  <button>Khoảng 100 ms do 100 lần đi về</button>
+  <p class="explain">Thời gian thực thi gần như bằng 0; mỗi lệnh tuần tự tốn trọn một RTT. 100 × 1 ms = 100 ms. Dùng <code>MGET</code> hoặc pipeline thì chỉ còn khoảng 1 ms.</p>
+</div>
+
+<div class="quiz" data-correct="0">
+  <p class="q">Ngoài giảm thời gian mạng, pipelining giúp server Redis thế nào?</p>
+  <button>Gộp nhiều lệnh vào ít syscall read/write hơn</button>
+  <button>Chạy các lệnh trong pipeline song song nhau</button>
+  <button>Bỏ qua hàng đợi, ưu tiên chạy trước tiên</button>
+  <p class="explain">Lệnh vẫn chạy tuần tự trên luồng chính, nhưng một <code>read()</code> đọc được nhiều lệnh và một <code>write()</code> trả được nhiều kết quả, nên CPU tốn cho syscall giảm hẳn.</p>
+</div>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Pipeline gồm <code>GET balance</code> rồi <code>SET balance</code>. Client khác có thể ghi vào <code>balance</code> ở giữa hai lệnh không?</p>
+  <button>Không, pipeline luôn chạy nguyên tử cả khối</button>
+  <button>Có, pipeline không đảm bảo tính nguyên tử</button>
+  <button>Không, vì Redis khoá key trong pipeline</button>
+  <p class="explain">Pipeline chỉ là cách gửi lệnh. Lệnh của client khác vẫn có thể chen vào giữa. Cần nguyên tử thì dùng <code>MULTI/EXEC</code> hoặc Lua.</p>
+</div>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Vì sao không nên nhét 5 triệu lệnh vào một pipeline duy nhất?</p>
+  <button>Redis giới hạn cứng 1000 lệnh mỗi pipeline</button>
+  <button>Server phải giữ mọi kết quả trong RAM</button>
+  <button>Pipeline lớn sẽ tự chuyển thành transaction</button>
+  <p class="explain">Server đệm toàn bộ kết quả cho tới khi gửi đi, nên bộ nhớ dùng cho output buffer có thể phình to. Chia mẻ khoảng 10k lệnh.</p>
+</div>
+
+<div class="quiz" data-correct="2">
+  <p class="q"><em>Ôn bài 1:</em> Redis bỗng chậm với mọi client. Lệnh nào nên chạy đầu tiên để tìm thủ phạm?</p>
+  <button><code>INFO memory</code> để xem dung lượng RAM</button>
+  <button><code>KEYS *</code> để liệt kê toàn bộ key</button>
+  <button><code>SLOWLOG GET</code> để xem lệnh chạy lâu</button>
+  <p class="explain">Slow log cho biết lệnh nào đã chiếm luồng chính lâu, kèm client gửi lệnh đó. Còn <code>KEYS *</code> thì chính nó là một thủ phạm.</p>
+</div>
+
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://redis.io/docs/latest/develop/using-commands/pipelining/">Redis pipelining, redis.io</a>. Đọc mục <em>"RTT and Redis pipelining"</em> và <em>"It's not just a matter of RTT"</em> (~5 phút).</p>
+
+<div class="box">
+  <span class="label">Hỏi thầy</span>
+  Hỏi agent bất cứ gì chưa rõ, ví dụ: <em>"MGET và pipeline nhiều GET khác nhau thế nào?"</em> hoặc <em>"Lettuce dùng chung một connection cho nhiều thread thì có phải là pipeline không?"</em>
+</div>
+
+<footer>
+  ← <a href="0001-mot-luong-xu-ly-tat-ca.html">Bài 1: Một luồng xử lý tất cả</a> · Bài tiếp: <a href="0003-cung-la-hash-khac-bo-nho.html">Bài 3: Cùng là HASH, khác 4.6 lần bộ nhớ</a> →<br>
+  Tham khảo: <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a>
+</footer>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

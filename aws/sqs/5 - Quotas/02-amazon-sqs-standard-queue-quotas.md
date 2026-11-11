@@ -1,0 +1,15 @@
+# Các quota của Amazon SQS standard queue (Amazon SQS standard queue quotas)
+
+> Nguồn: [Amazon SQS standard queue quotas](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-queues.html)
+
+Bảng sau liệt kê các quota liên quan đến standard queue.
+
+| Quota | Mô tả |
+| --- | --- |
+| **Delay queue** | Độ trễ (delay) mặc định (tối thiểu) cho một queue là 0 giây. Tối đa là 15 phút. |
+| **Listed queues** | 1.000 queue cho mỗi request [`ListQueues`](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_ListQueues.html). |
+| **Long polling wait time** | Thời gian chờ long polling tối đa là 20 giây. |
+| **Messages per queue (backlog)** | Số lượng message mà một Amazon SQS queue có thể lưu trữ là không giới hạn. |
+| **Messages per queue (in flight)** | Đối với hầu hết các standard queue (tùy thuộc vào lưu lượng của queue và lượng message tồn đọng – backlog), có thể có tối đa khoảng 120.000 message in-flight (đã được consumer nhận từ queue, nhưng chưa bị xóa khỏi queue). Nếu bạn chạm tới quota này khi đang sử dụng [short polling](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-short-and-long-polling.html#sqs-short-polling), Amazon SQS trả về thông báo lỗi `OverLimit`. Nếu bạn sử dụng [long polling](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-short-and-long-polling.html#sqs-long-polling), Amazon SQS không trả về thông báo lỗi nào. Để tránh chạm tới quota, bạn nên xóa message khỏi queue sau khi chúng được xử lý. Bạn cũng có thể tăng số lượng queue mà bạn sử dụng để xử lý message. Để yêu cầu tăng quota, hãy [gửi một support request](https://console.aws.amazon.com/servicequotas/home/services/sqs/quotas). |
+| **Queue name** | Tên queue có thể có tối đa 80 ký tự. Các ký tự sau được chấp nhận: ký tự chữ và số (alphanumeric), dấu gạch ngang (`-`), và dấu gạch dưới (`_`). Tên queue phân biệt chữ hoa chữ thường (case-sensitive) (ví dụ, `Test-queue` và `test-queue` là hai queue khác nhau). |
+| **Queue tag** | Chúng tôi không khuyến nghị thêm quá 50 tag cho một queue. Việc gắn tag hỗ trợ các ký tự Unicode trong UTF-8.<br><br>Tag Key là bắt buộc, nhưng tag Value là tùy chọn.<br><br>Tag Key và tag Value phân biệt chữ hoa chữ thường (case-sensitive).<br><br>Tag Key và tag Value có thể bao gồm các ký tự chữ và số (alphanumeric) Unicode trong UTF-8 và khoảng trắng. Các ký tự đặc biệt sau được cho phép: `_ . : / = + - @`<br><br>Tag Key hoặc Value không được chứa tiền tố dành riêng (reserved prefix) `aws:` (bạn không thể xóa các tag key hoặc value có tiền tố này).<br><br>Độ dài tối đa của tag Key là 128 ký tự Unicode trong UTF-8. Tag Key không được rỗng (empty) hoặc null.<br><br>Độ dài tối đa của tag Value là 256 ký tự Unicode trong UTF-8. Tag Value có thể rỗng hoặc null.<br><br>Các action gắn tag bị giới hạn ở 30 TPS cho mỗi AWS account. Nếu ứng dụng của bạn yêu cầu thông lượng cao hơn, hãy [gửi yêu cầu](https://console.aws.amazon.com/servicequotas/home/services/sqs/quotas). |

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redis Glossary</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Redis · Tham khảo · <a href="cli-cheatsheet.html">Cheatsheet</a></nav>
+<h1>Thuật ngữ Redis</h1>
+<p class="subtitle">Dùng thống nhất trong mọi bài học. Cập nhật sau mỗi bài.</p>
+<div class="table-wrap"><table>
+<tr><th>Thuật ngữ</th><th>Nghĩa</th><th>Bài</th></tr>
+<tr><td><strong>In-memory</strong></td><td>Dữ liệu chính nằm trong RAM; đĩa chỉ để lưu bản sao (persistence).</td><td><a href="../lessons/0001-mot-luong-xu-ly-tat-ca.html">1</a></td></tr>
+<tr><td><strong>Luồng chính</strong> (main thread)</td><td>Luồng duy nhất thực thi lệnh. Lệnh chạy tuần tự, nên một lệnh chậm sẽ chặn mọi client.</td><td><a href="../lessons/0001-mot-luong-xu-ly-tat-ca.html">1</a></td></tr>
+<tr><td><strong>I/O threads</strong></td><td>Luồng phụ (Redis 6+, Valkey) đọc/ghi socket song song. Không thực thi lệnh.</td><td><a href="../lessons/0001-mot-luong-xu-ly-tat-ca.html">1</a></td></tr>
+<tr><td><strong>TTL</strong> (time to live)</td><td>Thời gian sống còn lại của key. <code>-1</code> = không có hạn, <code>-2</code> = key không tồn tại.</td><td><a href="../lessons/0001-mot-luong-xu-ly-tat-ca.html">1</a></td></tr>
+<tr><td><strong>Slow log</strong></td><td>Nhật ký các lệnh chạy lâu hơn <code>slowlog-log-slower-than</code> µs (mặc định 10000). Chỉ đo thời gian thực thi, không tính thời gian mạng.</td><td><a href="../lessons/0001-mot-luong-xu-ly-tat-ca.html">1</a></td></tr>
+<tr><td><strong>Lệnh O(N)</strong></td><td>Lệnh có chi phí tăng theo kích thước dữ liệu (<code>KEYS</code>, <code>SMEMBERS</code>…). Nguy hiểm trên tập lớn.</td><td><a href="../lessons/0001-mot-luong-xu-ly-tat-ca.html">1</a></td></tr>
+<tr><td><strong>Valkey</strong></td><td>Bản fork mã nguồn mở của Redis; một trong các engine của ElastiCache cùng với Redis OSS.</td><td><a href="../lessons/0001-mot-luong-xu-ly-tat-ca.html">1</a></td></tr>
+<tr><td><strong>EngineCPUUtilization</strong></td><td>Metric ElastiCache đo riêng luồng chính. Dùng thay cho <code>CPUUtilization</code> trên node từ 4 vCPU trở lên.</td><td><a href="../lessons/0001-mot-luong-xu-ly-tat-ca.html">1</a></td></tr>
+<tr><td><strong>RTT</strong> (round-trip time)</td><td>Thời gian một lệnh đi từ app tới Redis và kết quả quay về. Thường lớn hơn thời gian thực thi hàng trăm lần.</td><td><a href="../lessons/0002-ke-thu-la-round-trip.html">2</a></td></tr>
+<tr><td><strong>Pipelining</strong></td><td>Gửi nhiều lệnh không chờ từng kết quả, đọc kết quả một lượt. Giảm RTT và syscall. <em>Không</em> nguyên tử.</td><td><a href="../lessons/0002-ke-thu-la-round-trip.html">2</a></td></tr>
+<tr><td><strong>N+1 với Redis</strong></td><td>Vòng lặp gọi Redis từng key một. Sửa bằng <code>MGET</code> hoặc pipeline.</td><td><a href="../lessons/0002-ke-thu-la-round-trip.html">2</a></td></tr>
+<tr><td><strong>Encoding</strong></td><td>Cấu trúc lưu trữ thật trong RAM của một key, trong suốt với API. Xem bằng <code>OBJECT ENCODING</code>.</td><td><a href="../lessons/0003-cung-la-hash-khac-bo-nho.html">3</a></td></tr>
+<tr><td><strong>Listpack</strong></td><td>Mảng nén liền khối cho hash/set/zset/list nhỏ. Tiết kiệm RAM, tra cứu O(N). Redis ≤ 6.2 gọi là <em>ziplist</em>.</td><td><a href="../lessons/0003-cung-la-hash-khac-bo-nho.html">3</a></td></tr>
+<tr><td><strong>Hashtable</strong></td><td>Encoding cho hash/set lớn: tra cứu O(1), tốn RAM hơn nhiều. Không tự quay về listpack khi nhỏ lại.</td><td><a href="../lessons/0003-cung-la-hash-khac-bo-nho.html">3</a></td></tr>
+<tr><td><strong>Intset</strong></td><td>Encoding cho set nhỏ chỉ chứa số nguyên.</td><td><a href="../lessons/0003-cung-la-hash-khac-bo-nho.html">3</a></td></tr>
+<tr><td><strong>Passive expiry</strong></td><td>Xoá key hết hạn khi có client truy cập nó.</td><td><a href="../lessons/0004-key-het-han-the-nao.html">4</a></td></tr>
+<tr><td><strong>Active expiry</strong></td><td>Định kỳ lấy mẫu ngẫu nhiên key có TTL và xoá key đã hết hạn (gắn với <code>hz</code>, mặc định 10).</td><td><a href="../lessons/0004-key-het-han-the-nao.html">4</a></td></tr>
+<tr><td><strong>Cache avalanche</strong></td><td>Nhiều key hết hạn cùng lúc làm request dồn xuống DB. Phòng bằng jitter TTL.</td><td><a href="../lessons/0004-key-het-han-the-nao.html">4</a></td></tr>
+<tr><td><strong>MULTI/EXEC</strong></td><td>Transaction: xếp hàng lệnh rồi chạy liền một mạch. <em>Không rollback</em>; lỗi lúc xếp hàng thì <code>EXECABORT</code>.</td><td><a href="../lessons/0005-transaction-khong-rollback.html">5</a></td></tr>
+<tr><td><strong>WATCH</strong></td><td>Khoá lạc quan: EXEC trả nil nếu key được watch đã bị sửa.</td><td><a href="../lessons/0005-transaction-khong-rollback.html">5</a></td></tr>
+<tr><td><strong>Lua script (EVAL)</strong></td><td>Chạy nguyên tử trên server, chiếm luồng chính. Quá <code>busy-reply-threshold</code> (5000 ms) thì client khác nhận <code>BUSY</code>.</td><td><a href="../lessons/0005-transaction-khong-rollback.html">5</a></td></tr>
+<tr><td><strong>maxmemory</strong></td><td>Trần RAM cho dữ liệu. Self-host mặc định 0 (không giới hạn).</td><td><a href="../lessons/0006-khi-ram-day.html">6</a></td></tr>
+<tr><td><strong>Eviction policy</strong></td><td>Cách chọn key để xoá khi đầy: noeviction, allkeys-lru/lfu, volatile-*… <code>volatile-*</code> không có key TTL thì hoạt động như noeviction.</td><td><a href="../lessons/0006-khi-ram-day.html">6</a></td></tr>
+<tr><td><strong>Approximated LRU</strong></td><td>Lấy mẫu <code>maxmemory-samples</code> (5) key, xoá key cũ nhất trong mẫu.</td><td><a href="../lessons/0006-khi-ram-day.html">6</a></td></tr>
+<tr><td><strong>RDB</strong></td><td>Snapshot toàn bộ dữ liệu ra <code>dump.rdb</code> qua process con được fork.</td><td><a href="../lessons/0007-rdb-va-fork.html">7</a></td></tr>
+<tr><td><strong>Copy-on-write (COW)</strong></td><td>Sau fork, trang bộ nhớ nào cha sửa thì bị nhân bản. Gây tăng RAM khi backup/replication.</td><td><a href="../lessons/0007-rdb-va-fork.html">7</a></td></tr>
+<tr><td><strong>reserved-memory-percent</strong></td><td>Tham số ElastiCache (mặc định 25%) chừa RAM cho backup và replication.</td><td><a href="../lessons/0007-rdb-va-fork.html">7</a></td></tr>
+<tr><td><strong>AOF</strong></td><td>Log nối đuôi mọi lệnh ghi. Redis 7: các file base + incr + manifest.</td><td><a href="../lessons/0008-aof-va-do-ben.html">8</a></td></tr>
+<tr><td><strong>appendfsync</strong></td><td>always / everysec (mặc định, mất ~1 s) / no.</td><td><a href="../lessons/0008-aof-va-do-ben.html">8</a></td></tr>
+<tr><td><strong>AOF rewrite</strong></td><td>Viết lại AOF thành dạng gọn nhất; dùng fork.</td><td><a href="../lessons/0008-aof-va-do-ben.html">8</a></td></tr>
+</table></div>
+</main>
+</body>
+</html>

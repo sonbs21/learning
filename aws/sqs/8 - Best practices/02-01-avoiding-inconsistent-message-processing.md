@@ -1,0 +1,5 @@
+# Tránh việc xử lý message không nhất quán trong Amazon SQS (Avoiding inconsistent message processing in Amazon SQS)
+
+> Nguồn: [Avoiding inconsistent message processing in Amazon SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/avoiding-inconsistent-message-processing.html)
+
+Vì Amazon SQS là một hệ thống phân tán, có khả năng một consumer không nhận được một message ngay cả khi Amazon SQS đánh dấu message đó là đã được phân phối (delivered) trong khi trả về thành công từ một lời gọi API method [`ReceiveMessage`](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_ReceiveMessage.html). Trong trường hợp này, Amazon SQS ghi nhận message là đã được phân phối ít nhất một lần, mặc dù consumer chưa bao giờ nhận được nó. Vì không có thêm lần thử phân phối message nào được thực hiện trong các điều kiện này, chúng tôi không khuyến nghị đặt số lần nhận tối đa (maximum receives) là 1 cho một [dead-letter queue](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html).

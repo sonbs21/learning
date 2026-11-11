@@ -1,0 +1,7 @@
+# Ngăn chặn xử lý trùng lặp trong hệ thống nhiều producer/consumer của Amazon SQS (Preventing duplicate processing in a multiple-producer/consumer system in Amazon SQS)
+
+> Nguồn: [Preventing duplicate processing in a multiple-producer/consumer system in Amazon SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/avoding-processing-duplicates-in-multiple-producer-consumer-system.html)
+
+Trong một hệ thống có thông lượng cao, độ trễ thấp (high-throughput, low-latency) mà thứ tự message không phải là ưu tiên, các producer có thể gán một [`MessageGroupId`](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SendMessage.html) duy nhất cho mỗi message. Điều này đảm bảo rằng Amazon SQS FIFO queue loại bỏ các bản trùng lặp, ngay cả trong một thiết lập nhiều producer/nhiều consumer (multiple-producer/multiple-consumer). Mặc dù cách tiếp cận này ngăn chặn các message trùng lặp, nó không đảm bảo thứ tự message vì mỗi message được coi là một group độc lập của riêng nó.
+
+Trong bất kỳ hệ thống nào có nhiều producer và consumer, luôn có rủi ro phân phối trùng lặp. Nếu một consumer xử lý message thất bại trước khi visibility timeout hết hạn, Amazon SQS sẽ làm cho message sẵn có trở lại, có khả năng cho phép một consumer khác lấy nó. Để giảm thiểu điều này, hãy đảm bảo việc xác nhận message (message acknowledgment) phù hợp và các thiết lập visibility timeout dựa trên thời gian xử lý.

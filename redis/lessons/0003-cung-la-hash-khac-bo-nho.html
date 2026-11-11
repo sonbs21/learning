@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cùng là HASH, khác bộ nhớ</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Redis · Bài 3 · <a href="0002-ke-thu-la-round-trip.html">← Bài 2</a> · <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></nav>
+
+<h1>Cùng là HASH, khác 4.6 lần bộ nhớ</h1>
+<p class="subtitle">Bên dưới mỗi data type, Redis âm thầm chọn một cấu trúc lưu trữ. Thêm đúng một field có thể làm key to gấp mấy lần. ~15 phút.</p>
+
+<div class="box goal">
+  <span class="label">Sau bài này bạn sẽ</span>
+  Dùng <code>OBJECT ENCODING</code> và <code>MEMORY USAGE</code> để nhìn vào bên trong một key, và giải thích được vì sao một hash 513 field tốn bộ nhớ gấp 4.6 lần hash 512 field.
+</div>
+
+<h2>1. Type là thứ bạn thấy, encoding là thứ nằm trong RAM</h2>
+
+<p>Khi bạn gọi <code>HSET</code>, bạn làm việc với kiểu <strong>hash</strong>. Nhưng Redis tự chọn cách lưu hash đó trong RAM, gọi là <strong>encoding</strong>. Việc chọn này <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/">hoàn toàn trong suốt với API</a>: lệnh của bạn vẫn y nguyên, chỉ có bộ nhớ và CPU là khác.</p>
+
+<div class="table-wrap"><table>
+<tr><th>Type</th><th>Encoding khi nhỏ</th><th>Encoding khi lớn</th></tr>
+<tr><td>string</td><td><code>int</code> (số nguyên), <code>embstr</code> (chuỗi ngắn)</td><td><code>raw</code></td></tr>
+<tr><td>hash</td><td><code>listpack</code></td><td><code>hashtable</code></td></tr>
+<tr><td>set</td><td><code>intset</code> (toàn số nguyên), <code>listpack</code></td><td><code>hashtable</code></td></tr>
+<tr><td>sorted set</td><td><code>listpack</code></td><td><code>skiplist</code> + hashtable</td></tr>
+<tr><td>list</td><td colspan="2"><code>quicklist</code> (chuỗi các node listpack)</td></tr>
+</table></div>
+<p class="note">Tên encoding theo <a href="https://redis.io/docs/latest/commands/object-encoding/">OBJECT ENCODING</a> cho Redis 7.x. Redis 6.2 trở về trước gọi listpack là <code>ziplist</code>; bạn vẫn sẽ gặp tên này trong tài liệu cũ và trong cấu hình.</p>
+
+<h3>Listpack: mảng nén, đổi CPU lấy RAM</h3>
+<p><strong>Listpack</strong> xếp các phần tử liền nhau trong một khối bộ nhớ, không có con trỏ, không có bucket. Rất tiết kiệm RAM, docs cho biết <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/">tiết kiệm tới 10 lần, trung bình khoảng 5 lần</a>. Cái giá: muốn tìm một field phải duyệt tuần tự, độ phức tạp O(N). Với N nhỏ thì không đáng kể. Với N lớn thì luồng chính bị chiếm lâu, và bạn đã biết chuyện đó dẫn tới đâu ở <a href="0001-mot-luong-xu-ly-tat-ca.html">bài 1</a>.</p>
+
+<p>Vì vậy Redis đặt ngưỡng. Vượt ngưỡng, key tự chuyển sang <strong>hashtable</strong> (tra cứu O(1) nhưng tốn RAM hơn nhiều). Ngưỡng mặc định trên Redis 7.4 (đo bằng <code>CONFIG GET</code> khi soạn bài):</p>
+<pre><code>hash-max-listpack-entries   512   <span class="c">← tối đa số field</span>
+hash-max-listpack-value     64    <span class="c">← tối đa độ dài một field/value (byte)</span>
+set-max-intset-entries      512
+set-max-listpack-entries    128
+zset-max-listpack-entries   128</code></pre>
+<p class="note">Một số blog ghi <code>hash-max-listpack-entries</code> mặc định là 128. Trên Redis 7.4 giá trị này là 512. Luôn kiểm tra bằng <code>CONFIG GET</code> trên đúng phiên bản bạn chạy.</p>
+
+<h2>2. Lab: nhìn tận mắt (~7 phút)</h2>
+<ol class="steps">
+<li>Vào redis-cli (container từ bài trước):
+<pre><code>docker exec -it redis-lab redis-cli</code></pre></li>
+<li>Encoding của string:
+<pre><code>SET n 12345        →  OBJECT ENCODING n   <span class="c">"int"</span>
+SET s hello        →  OBJECT ENCODING s   <span class="c">"embstr"</span></code></pre></li>
+<li>Tạo hash 512 field và hash 513 field. Thoát redis-cli rồi chạy ở shell (gửi lệnh hàng loạt qua stdin):
+<pre><code>for i in $(seq 1 512); do echo "HSET h512 f$i v$i"; done | docker exec -i redis-lab redis-cli > /dev/null
+for i in $(seq 1 513); do echo "HSET h513 f$i v$i"; done | docker exec -i redis-lab redis-cli > /dev/null</code></pre></li>
+<li>So sánh:
+<pre><code>docker exec redis-lab redis-cli OBJECT ENCODING h512   <span class="c">"listpack"</span>
+docker exec redis-lab redis-cli MEMORY USAGE h512      <span class="c">6192   (byte)</span>
+docker exec redis-lab redis-cli OBJECT ENCODING h513   <span class="c">"hashtable"</span>
+docker exec redis-lab redis-cli MEMORY USAGE h513      <span class="c">28816  (byte)  ← gấp 4.6 lần, chỉ vì thêm 1 field</span></code></pre></li>
+<li><strong>Thí nghiệm then chốt:</strong> xoá bớt field của <code>h513</code> cho tới khi chỉ còn 1:
+<pre><code>for i in $(seq 2 513); do echo "HDEL h513 f$i"; done | docker exec -i redis-lab redis-cli > /dev/null
+docker exec redis-lab redis-cli HLEN h513              <span class="c">1</span>
+docker exec redis-lab redis-cli OBJECT ENCODING h513   <span class="c">"hashtable"  ← không quay về listpack</span></code></pre>
+Đã chuyển sang hashtable thì key ở luôn đó trong lúc server đang chạy. Chỉ một lần phình to tạm thời cũng để lại chi phí lâu dài.</li>
+<li>Bẫy thứ hai: chỉ một value dài hơn 64 byte cũng đủ chuyển cả hash:
+<pre><code>HSET user:2 name son
+HSET user:2 bio "&lt;một chuỗi dài 65 ký tự&gt;"
+OBJECT ENCODING user:2   <span class="c">"hashtable"</span></code></pre></li>
+</ol>
+
+<h2>3. Hệ quả trên production</h2>
+<ul>
+<li><strong>Ước tính RAM sai.</strong> Bạn test với 100 field/user, rồi production có user 600 field: mỗi key to gấp nhiều lần dự tính. Trên ElastiCache, kích cỡ node (và tiền) dựa trên RAM, nên đây là bài toán chi phí thật.</li>
+<li><strong>Một field "lạc loài" phá cả key.</strong> Nhét một chuỗi JSON dài vào một field là cả hash chuyển sang hashtable.</li>
+<li><strong>Đừng tăng ngưỡng bừa.</strong> Tăng <code>hash-max-listpack-entries</code> lên 10000 tiết kiệm RAM nhưng mỗi <code>HGET</code> phải duyệt tuần tự hàng nghìn phần tử trên luồng chính. Docs khuyên <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/">benchmark trước khi tăng ngưỡng nhiều</a>.</li>
+<li><strong>Trên ElastiCache</strong> bạn không sửa được <code>redis.conf</code>; cấu hình đi qua <em>parameter group</em> (sẽ học ở phần ElastiCache).</li>
+</ul>
+
+<h2>4. Tự kiểm tra</h2>
+<p class="quiz-score">Điểm: 0/5</p>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Hash đang có 300 field ngắn. Bạn thêm một field có value dài 200 byte. Điều gì xảy ra?</p>
+  <button>Chỉ field mới được lưu dạng hashtable riêng</button>
+  <button>Cả hash chuyển sang hashtable, tốn RAM hơn</button>
+  <button>Redis từ chối ghi vì value vượt ngưỡng</button>
+  <p class="explain">Ngưỡng <code>hash-max-listpack-value</code> (64 byte) áp dụng cho từng phần tử. Một phần tử vượt ngưỡng là cả key chuyển encoding. Redis không từ chối ghi.</p>
+</div>
+
+<div class="quiz" data-correct="0">
+  <p class="q">Một hash phình lên 2000 field rồi bị xoá còn 10 field. Encoding bây giờ là gì?</p>
+  <button>Vẫn là hashtable, không tự quay về</button>
+  <button>Tự quay lại listpack vì đã nhỏ lại</button>
+  <button>Chuyển sang intset vì ít phần tử</button>
+  <p class="explain">Bạn đã tự kiểm chứng trong lab: xoá bớt không làm key quay về listpack trong lúc server đang chạy.</p>
+</div>
+
+<div class="quiz" data-correct="2">
+  <p class="q">Vì sao Redis không dùng listpack cho mọi kích thước?</p>
+  <button>Listpack không hỗ trợ lưu chuỗi ký tự</button>
+  <button>Listpack chỉ dùng được cho kiểu string</button>
+  <button>Tra cứu listpack là O(N), chặn luồng chính</button>
+  <p class="explain">Listpack là mảng liền nhau, phải duyệt tuần tự. N lớn thì mỗi lệnh chiếm luồng chính lâu, làm chậm mọi client.</p>
+</div>
+
+<div class="quiz" data-correct="2">
+  <p class="q">Lệnh nào cho biết một key đang chiếm bao nhiêu byte RAM?</p>
+  <button><code>OBJECT ENCODING key</code></button>
+  <button><code>STRLEN key</code> hoặc <code>HLEN key</code></button>
+  <button><code>MEMORY USAGE key</code></button>
+  <p class="explain"><code>OBJECT ENCODING</code> cho biết cấu trúc lưu trữ; <code>HLEN</code>/<code>STRLEN</code> cho biết số phần tử hoặc độ dài; <code>MEMORY USAGE</code> mới trả về số byte.</p>
+</div>
+
+<div class="quiz" data-correct="0">
+  <p class="q"><em>Ôn bài 2:</em> Endpoint đọc cache cho 50 sản phẩm bằng vòng lặp <code>GET</code>. Cách sửa tốt nhất?</p>
+  <button>Gộp thành một lệnh <code>MGET</code> duy nhất</button>
+  <button>Tăng số vCPU của node ElastiCache lên</button>
+  <button>Bật I/O threads để chạy song song lệnh</button>
+  <p class="explain">Thủ phạm là 50 lần đi và về, không phải CPU của Redis. <code>MGET</code> (hoặc pipeline) giảm xuống còn 1 RTT.</p>
+</div>
+
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/">Memory optimization, redis.io</a>. Đọc mục <em>"Special encoding of small aggregate data types"</em> (~5 phút).</p>
+
+<div class="box">
+  <span class="label">Hỏi thầy</span>
+  Hỏi agent nếu còn thắc mắc, ví dụ: <em>"lưu user dạng 1 hash nhiều field hay nhiều key string thì tốn RAM hơn?"</em> hoặc <em>"skiplist của sorted set hoạt động thế nào?"</em>
+</div>
+
+<p class="note">Dọn dẹp: <code>docker rm -f redis-lab</code></p>
+
+<footer>
+  ← <a href="0002-ke-thu-la-round-trip.html">Bài 2: Kẻ thù là round-trip</a> · Bài tiếp: <a href="0004-key-het-han-the-nao.html">Bài 4: Key hết hạn thế nào</a> →<br>
+  Tham khảo: <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a>
+</footer>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

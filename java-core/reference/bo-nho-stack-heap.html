@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cheat sheet Stack Heap</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Java Core · Reference · <a href="thuat-ngu.html">Thuật ngữ</a> · Từ <a href="../lessons/0001-stack-heap-va-tham-chieu.html">Bài 1</a></nav>
+<h1>Stack, Heap &amp; pass-by-value</h1>
+<p class="subtitle">Một trang. In ra, dán cạnh màn hình.</p>
+
+<h2>Cái gì nằm ở đâu</h2>
+<div class="table-wrap"><table>
+<tr><th>Thứ</th><th>Vị trí</th><th>Sống bao lâu</th></tr>
+<tr><td>Biến local, tham số (mọi kiểu)</td><td>Frame trên <strong>stack</strong> của thread</td><td>Tới khi method trả về</td></tr>
+<tr><td>Object, mảng (<code>new …</code>)</td><td><strong>Heap</strong></td><td>Tới khi không còn tham chiếu nào và GC thu hồi</td></tr>
+<tr><td>Field của object (kể cả <code>int</code>)</td><td>Bên trong object, tức trên <strong>heap</strong></td><td>Cùng với object chứa nó</td></tr>
+</table></div>
+<p>Biến primitive chứa <em>giá trị</em>. Biến reference chứa <em>mũi tên</em> (giá trị tham chiếu) hoặc <code>null</code>.</p>
+
+<h2>Quy tắc duy nhất khi gọi method</h2>
+<div class="box key"><p><code>m(a)</code> tạo frame mới, tạo biến tham số mới, rồi <strong>copy giá trị của <code>a</code></strong> vào đó (<a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.4.1">JLS §8.4.1</a>). Java luôn pass-by-value.</p></div>
+
+<div class="table-wrap"><table>
+<tr><th>Trong method làm…</th><th>Người gọi có thấy không?</th><th>Vì sao</th></tr>
+<tr><td><code>x = x + 1</code> (primitive)</td><td>Không</td><td>Chỉ sửa bản copy</td></tr>
+<tr><td><code>p.name = "…"</code></td><td><strong>Có</strong></td><td>Đi theo mũi tên, sửa object chung</td></tr>
+<tr><td><code>p = new Person(…)</code></td><td>Không</td><td>Chỉ bẻ mũi tên cục bộ</td></tr>
+<tr><td><code>swap(a, b)</code></td><td>Không</td><td>Tráo hai bản copy</td></tr>
+<tr><td><code>return newObj;</code> rồi gán lại ở ngoài</td><td>Có</td><td>Đây là cách “đổi biến” đúng trong Java</td></tr>
+</table></div>
+
+<h2>Câu trả lời phỏng vấn mẫu (30 giây)</h2>
+<p><em>“Java luôn pass-by-value. Với primitive, giá trị được copy là con số. Với object, giá trị được copy là reference, nên method sửa được trạng thái của object nhưng không gán lại được biến của người gọi. Ví dụ: hàm swap hai object không có tác dụng gì ở bên ngoài.”</em></p>
+</main>
+</body>
+</html>

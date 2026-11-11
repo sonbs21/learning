@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cấu hình và profile</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Cấu hình bên ngoài code</h1>
+<p class="subtitle">Bài 5 · <code>application.properties</code>, <code>@Value</code>, ghi đè cấu hình, profile và <code>@ConfigurationProperties</code></p>
+<div class="meta"><span>~45 phút</span><span>Cần: <a href="0004-scope-va-vong-doi-bean.html">Bài 4</a></span><span>Lab: <code>./lab</code></span></div>
+
+<p>Cùng một app phải chạy ở nhiều nơi: máy của bạn (dev), server test và production. Mỗi nơi có database, mật khẩu và địa chỉ khác nhau. Nếu viết cứng những giá trị đó trong code thì mỗi lần đổi môi trường là phải sửa code rồi build lại. Spring Boot giải quyết bằng cách <strong>đưa cấu hình ra khỏi code</strong>. <a class="cite" href="https://docs.spring.io/spring-boot/reference/features/external-config.html">[docs]</a></p>
+
+<h2>1 · Bốn công cụ trong bài này</h2>
+<table>
+  <tr><th>Công cụ</th><th>Dùng để</th></tr>
+  <tr><td><code>application.properties</code></td><td>File chứa các cặp <code>key=value</code>, nằm trong <code>src/main/resources</code></td></tr>
+  <tr><td><code>@Value("${key}")</code></td><td>Tiêm <em>một</em> giá trị vào constructor</td></tr>
+  <tr><td>Profile (<code>application-dev.properties</code>)</td><td>Bộ giá trị riêng cho từng môi trường</td></tr>
+  <tr><td><code>@ConfigurationProperties</code></td><td>Gom <em>một nhóm</em> key có chung tiền tố vào một object</td></tr>
+</table>
+
+<h2>2 · Ai thắng khi một key được khai báo ở nhiều nơi?</h2>
+<p>Spring Boot đọc cấu hình từ nhiều nguồn, và <strong>nguồn đọc sau ghi đè nguồn đọc trước</strong>. Dưới đây là bản rút gọn, xếp từ yếu đến mạnh: <a class="cite" href="https://docs.spring.io/spring-boot/reference/features/external-config.html">[docs]</a></p>
+<ol class="flow">
+  <li><code>application.properties</code> trong jar</li>
+  <li><code>application-{profile}.properties</code>: file của profile luôn ghi đè file chung</li>
+  <li>Biến môi trường của hệ điều hành (ví dụ <code>SHOP_NAME</code>)</li>
+  <li>Tham số dòng lệnh <code>--shop.name=...</code> (mạnh nhất trong danh sách này)</li>
+</ol>
+<p>Nhờ vậy, khi chạy trên server, ta chỉ cần đặt biến môi trường hoặc tham số dòng lệnh, không phải đụng tới code hay file trong jar.</p>
+
+<hr>
+
+<h2>3 · Thực hành</h2>
+<div class="lab">
+<h3>Lab 5 · ~30 phút</h3>
+<ol>
+  <li><strong>Đặt <code>main</code> về bản gọn</strong>: thân hàm chỉ còn
+<pre><code>ApplicationContext context = SpringApplication.run(LabApplication.class, args);
+context.getBean(OrderService.class).placeOrder("an@example.com");</code></pre></li>
+
+  <li><strong>Thêm cấu hình.</strong> Mở <code>lab/src/main/resources/application.properties</code> và thêm vào cuối:
+<pre><code>shop.name=Son Shop
+shop.hotline=1900-1234</code></pre></li>
+
+  <li><strong><code>@Value</code>.</strong> Sửa <code>OrderService</code> để nhận tên cửa hàng (import <code>org.springframework.beans.factory.annotation.Value</code>):
+<pre><code>private final String shopName;
+
+public OrderService(EmailSender emailSender, Clock clock,
+                    <span class="hl">@Value("${shop.name}") String shopName</span>) {
+    this.emailSender = emailSender;
+    this.clock = clock;
+    this.shopName = shopName;
+}
+
+// trong placeOrder:
+emailSender.send(customer, "Cảm ơn bạn đã đặt hàng tại " + shopName + "!");</code></pre>
+  Chạy và kiểm tra tên cửa hàng trong email.</li>
+
+  <li><strong>Ghi đè bằng dòng lệnh.</strong>
+<pre><code>mvn -o -q spring-boot:run -Dspring-boot.run.arguments=--shop.name=TestShop</code></pre>
+  <strong>Đoán trước:</strong> email in ra "Son Shop" hay "TestShop"?</li>
+
+  <li><strong>Profile.</strong> Tạo file <code>lab/src/main/resources/application-dev.properties</code>:
+<pre><code>shop.name=Son Shop (DEV)</code></pre>
+  Chạy lần lượt hai lệnh và so sánh:
+<pre><code>mvn -o -q spring-boot:run
+mvn -o -q spring-boot:run -Dspring-boot.run.arguments=--spring.profiles.active=dev</code></pre></li>
+
+  <li><strong>Gõ sai key.</strong> Đổi thành <code>@Value("${shop.nam}")</code> rồi chạy và đọc lỗi. Sau đó thử <code>@Value("${shop.nam:Cửa hàng mặc định}")</code>. Phần sau dấu <code>:</code> là <em>giá trị mặc định</em>.</li>
+
+  <li><strong><code>@ConfigurationProperties</code>.</strong> Tạo <code>ShopProperties.java</code>:
+<pre><code>package dev.lab;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "shop")
+public record ShopProperties(String name, String hotline) {
+}</code></pre>
+  Sửa <code>OrderService</code> để nhận <code>ShopProperties shop</code> thay cho <code>@Value</code>, và gửi email
+  <code>"Cảm ơn bạn đã đặt hàng tại " + shop.name() + "! Hotline: " + shop.hotline()</code>. Chạy thử: bạn sẽ gặp lỗi gì?
+  Sau đó thêm <code>@ConfigurationPropertiesScan</code> (import <code>org.springframework.boot.context.properties.ConfigurationPropertiesScan</code>) ngay dưới <code>@SpringBootApplication</code> rồi chạy lại.</li>
+</ol>
+
+<details>
+  <summary>Kết quả mong đợi</summary>
+<pre><code># Bước 3
+Gửi email tới an@example.com: Cảm ơn bạn đã đặt hàng tại Son Shop!
+# Bước 4: dòng lệnh thắng file
+... tại <span class="hl">TestShop</span>!
+# Bước 5: không có profile / có profile dev
+... tại Son Shop!
+... tại <span class="hl">Son Shop (DEV)</span>!
+# Bước 6
+<span class="bad-hl">Could not resolve placeholder 'shop.nam' in value "${shop.nam}"</span>
+... tại Cửa hàng mặc định!
+# Bước 7: chưa có @ConfigurationPropertiesScan
+Parameter 2 of constructor in dev.lab.OrderService required a bean of type
+'dev.lab.ShopProperties' that could not be found.
+# Bước 7: đã có @ConfigurationPropertiesScan
+... tại Son Shop! Hotline: 1900-1234</code></pre>
+  <p>Bước 6 cho thấy Spring <strong>dừng app ngay lúc khởi động</strong> khi thiếu cấu hình, thay vì chạy tiếp với giá trị null rồi lỗi giữa chừng. Bước 7 là lỗi quen thuộc từ bài 1: <code>@ConfigurationProperties</code> chỉ mô tả cách đọc cấu hình, nó không tự biến class thành bean. Phải có <code>@ConfigurationPropertiesScan</code> thì Spring mới tìm và đăng ký nó. <a class="cite" href="https://docs.spring.io/spring-boot/reference/features/external-config.html#features.external-config.typesafe-configuration-properties.enabling-annotated-types">[docs]</a></p>
+</details>
+
+<p><strong>Trạng thái để sang bài 6:</strong> giữ <code>ShopProperties</code> và <code>@ConfigurationPropertiesScan</code>.</p>
+</div>
+
+<div class="callout">
+  <strong>Trong công việc thật</strong>
+  Không bao giờ commit mật khẩu thật vào <code>application.properties</code>. Hãy dùng biến môi trường hoặc secret manager trên server, và để file trong repo chỉ chứa giá trị cho dev.
+</div>
+
+<hr>
+
+<h2>4 · Kiểm tra trí nhớ</h2>
+<div class="quiz" data-quiz="q5"></div>
+<script type="application/json" id="q5">
+[
+  {
+    "q": "<code>application.properties</code> có <code>shop.name=Son Shop</code>, còn app được chạy với <code>--shop.name=TestShop</code>. Giá trị nào được dùng?",
+    "options": [
+      "Son Shop, vì file cấu hình luôn có ưu tiên cao nhất",
+      "Lỗi khởi động, vì cùng một key được khai báo hai nơi",
+      "TestShop, vì tham số dòng lệnh ghi đè giá trị trong file"
+    ],
+    "answer": 2,
+    "why": "Trong thứ tự nguồn cấu hình, tham số dòng lệnh đứng sau (mạnh hơn) file <code>application.properties</code>."
+  },
+  {
+    "q": "Chạy với profile <code>dev</code>. Cả <code>application.properties</code> và <code>application-dev.properties</code> đều có <code>shop.name</code>. Kết quả là gì?",
+    "options": [
+      "Lấy giá trị trong application-dev, vì file của profile ghi đè",
+      "Lấy giá trị trong application, vì file chung được ưu tiên",
+      "Spring nối hai giá trị lại thành một chuỗi dài hơn"
+    ],
+    "answer": 0,
+    "why": "Docs: file của profile luôn ghi đè file không có profile."
+  },
+  {
+    "q": "Viết <code>@Value(\"${shop.nam}\")</code> nhưng không có key nào như vậy. Điều gì xảy ra?",
+    "options": [
+      "Biến nhận giá trị null và app vẫn chạy bình thường",
+      "App lỗi ngay khi khởi động: Could not resolve placeholder 'shop.nam'",
+      "Spring tự dùng chuỗi rỗng rồi in cảnh báo ra log"
+    ],
+    "answer": 1,
+    "why": "Spring báo lỗi ngay lúc khởi động. Muốn có giá trị dự phòng thì viết <code>${shop.nam:giá trị mặc định}</code>."
+  },
+  {
+    "q": "Khi nào nên dùng <code>@ConfigurationProperties</code> thay cho <code>@Value</code>?",
+    "options": [
+      "Khi muốn giá trị cấu hình thay đổi lúc app đang chạy",
+      "Khi chỉ cần đọc đúng một giá trị đơn lẻ trong file",
+      "Khi có một nhóm cấu hình chung prefix, cần gom thành object"
+    ],
+    "answer": 2,
+    "why": "Gom một nhóm key có chung tiền tố (<code>shop.*</code>) vào một object có kiểu rõ ràng giúp code gọn và dễ kiểm soát hơn. Còn <code>@Value</code> hợp với từng giá trị lẻ."
+  }
+]
+</script>
+
+<h2>5 · Thử thách</h2>
+<ol>
+  <li>Trên server production, bạn muốn đổi <code>shop.hotline</code> mà <strong>không</strong> build lại jar. Hãy nêu hai cách.</li>
+  <li><em>Ôn bài 4:</em> vì sao không được lưu email của người dùng hiện tại vào field của một <code>@Service</code>?</li>
+</ol>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://docs.spring.io/spring-boot/reference/features/external-config.html">Spring Boot Reference: Externalized Configuration</a>. Trang này dài, lúc này bạn chỉ cần đọc phần mở đầu (danh sách thứ tự nguồn) và mục "Profile Specific Files", khoảng 10 phút.</p>
+<p>Tra nhanh: <a href="../reference/config.html">Cheat sheet: Cấu hình</a>.</p>
+<p class="ask">Có gì chưa rõ thì cứ hỏi teacher (Claude). Ví dụ: "application.yml khác application.properties thế nào?"</p>
+
+<div class="footer-nav no-print">
+  <a href="0004-scope-va-vong-doi-bean.html">← Bài 4: Scope &amp; vòng đời</a>
+  <a href="0006-rest-api-dau-tien.html">Bài 6: REST API đầu tiên →</a>
+</div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

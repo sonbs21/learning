@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 5 · Đọc bytecode với javap</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../reference/lo-trinh.html">Lộ trình</a> · Bài 5 · <a href="0004-hashmap-ben-trong.html">← Bài 4</a> · <a href="0006-garbage-collection.html">Bài 6 →</a> · <a href="../reference/thuat-ngu.html">Thuật ngữ</a></nav>
+
+<h1>Đừng tin, hãy <code>javap</code></h1>
+<p class="subtitle">Đọc bytecode để tận mắt thấy frame, operand stack, pass-by-value và constant folding.</p>
+
+<div class="goal">
+  <strong>Sau bài này bạn sẽ</strong>
+  Chạy <code>javap -c</code> trên code của chính mình và đọc được khoảng 10 instruction phổ biến nhất. Từ đó tự kiểm chứng mọi khẳng định ở Bài 1–2 mà không cần tin ai.
+</div>
+
+<details class="recall">
+  <summary>Ôn lại Bài 1 và 4</summary>
+  <p>(1) Một frame chứa những gì? (2) HashMap mặc định chuyển từ 32 lên 64 ô ở lần put thứ mấy?</p>
+  <p><em>Đáp án:</em> (1) Biến local (gồm cả tham số) và phần trung gian của phép tính; bài này sẽ gọi đúng tên phần đó là <em>operand stack</em>. (2) Lần thứ 25, vì threshold = 32 × 0.75 = 24.</p>
+</details>
+
+<h2>1. Frame có hai phần: local variables và operand stack</h2>
+<p>Bài 1 mới nói frame chứa biến local. Thật ra JVM là một <strong>máy stack</strong>: mỗi frame có thêm một <em>operand stack</em> làm “bàn nháp” để tính toán.</p>
+<blockquote class="spec">
+  “The Java Virtual Machine supplies instructions to load constants or values from local variables or fields onto the operand stack. Other Java Virtual Machine instructions take operands from the operand stack, operate on them, and push the result back onto the operand stack.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.6.2">JVMS §2.6.2</a></cite>
+</blockquote>
+<p>Biến local được đánh số theo <strong>slot</strong>: 0, 1, 2… Theo <a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.6.1">JVMS §2.6.1</a>, với method static, tham số chiếm các slot liên tiếp bắt đầu từ 0. Với method instance thì slot 0 luôn là <code>this</code>.</p>
+
+<h2>2. Cách chạy</h2>
+<pre><code>javac -d /tmp/l5 lessons/code/L0005Bytecode.java
+javap -c -p -cp /tmp/l5 L0005Bytecode</code></pre>
+<p><code>-c</code> in bytecode, <code>-p</code> hiện cả method private (<a href="https://docs.oracle.com/en/java/javase/21/docs/specs/man/javap.html">javap man page</a>). Mọi output bên dưới là kết quả chạy thật trên JDK 21.</p>
+
+<h2>3. Đọc <code>add(int a, int b)</code>: một phép tính</h2>
+<pre><code>static int add(int a, int b) { int sum = a + b; return sum; }
+
+0: iload_0     // đẩy giá trị slot 0 (a) lên operand stack
+1: iload_1     // đẩy b                         stack: [a, b]
+2: iadd        // lấy 2 số ra, cộng, đẩy kết quả stack: [a+b]
+3: istore_2    // lấy ra, cất vào slot 2 (sum)
+4: iload_2     // đẩy sum
+5: ireturn     // trả về giá trị trên đỉnh stack</code></pre>
+<p>Tiền tố của instruction cho biết kiểu dữ liệu: <code>i</code> là int, <code>a</code> là reference, <code>l</code> là long, <code>d</code> là double (<a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.11.1">JVMS §2.11.1</a>).</p>
+
+<h2>4. Bằng chứng cho pass-by-value</h2>
+<pre><code>// main:  int x = 10;  int y = add(x, 5);
+0: bipush 10
+2: istore_1          // x ở slot 1 (slot 0 là args)
+3: iload_1           // đẩy BẢN COPY giá trị của x lên stack
+4: iconst_5
+5: invokestatic add  // 2 giá trị trên stack thành slot 0, 1 của frame MỚI
+8: istore_2</code></pre>
+<p><code>invokestatic</code> lấy các giá trị trên operand stack của người gọi và đặt chúng vào local variables của frame mới. <strong>Không có instruction nào truyền “chính biến <code>x</code>”</strong>; chỉ có giá trị của nó được truyền đi. Với object cũng y như vậy:</p>
+<pre><code>// rename(an);   rồi bên trong:  p.name = "Bình";
+19: aload_3            // đẩy GIÁ TRỊ THAM CHIẾU của an
+20: invokestatic rename
+
+// trong rename:
+0: aload_0             // đẩy tham chiếu p (bản copy)
+1: ldc "Bình"          // đẩy tham chiếu tới String "Bình" trong constant pool
+3: putfield name       // đi theo tham chiếu, ghi vào field của OBJECT CHUNG</code></pre>
+<span class="sidenote">Đây chính là Hình 2 của <a href="0001-stack-heap-va-tham-chieu.html">Bài 1</a>, nhưng viết bằng ngôn ngữ của JVM.</span>
+
+<h2>5. Tạo object là 3 bước</h2>
+<pre><code>// Person an = new Person("An");
+ 9: new  Person          // cấp phát object trên heap, đẩy tham chiếu
+12: dup                  // nhân đôi tham chiếu (1 cho constructor, 1 để gán)
+13: ldc "An"
+15: invokespecial Person."&lt;init&gt;"   // gọi constructor
+18: astore_3             // cất tham chiếu vào slot 3 (an)</code></pre>
+<p>Cấp phát (<code>new</code>) và khởi tạo (<code>invokespecial &lt;init&gt;</code>) là hai bước tách biệt. Chi tiết này sẽ quan trọng khi học concurrency, vì ở đó có khả năng một thread khác nhìn thấy object “nửa vời”.</p>
+
+<h2>6. Constant folding và nối chuỗi</h2>
+<pre><code>// String s = "hi" == "hi" ? "same" : "diff";
+23: ldc "same"           // không có phép so sánh nào cả!
+25: astore 4
+
+// String t = an.name + y;
+27: aload_3
+28: getfield name
+31: iload_2
+32: invokedynamic makeConcatWithConstants   // nối chuỗi lúc runtime</code></pre>
+<p>Vì <code>"hi" == "hi"</code> là một <em>biểu thức hằng</em> (<a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.29">JLS §15.29</a> cho phép dùng <code>==</code> trong biểu thức hằng), compiler tính luôn và chỉ để lại <code>ldc "same"</code>. Còn <code>an.name + y</code> không phải hằng, nên được nối lúc runtime qua <code>invokedynamic</code>, cơ chế nối chuỗi có từ Java 9. Đây là bằng chứng bytecode cho các câu ở <a href="0002-so-sanh-bang-va-equals.html">Bài 2</a>.</p>
+
+<div class="box key">
+<p><strong>10 instruction cần nhớ</strong>: <code>iload/aload</code> (local lên stack), <code>istore/astore</code> (stack về local), <code>ldc</code> (hằng từ constant pool), <code>new</code> + <code>dup</code> + <code>invokespecial</code> (tạo object), <code>getfield/putfield</code>, <code>invokestatic/invokevirtual</code>, <code>ireturn/areturn/return</code>.</p>
+</div>
+
+<h2>7. Luyện tập</h2>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q1 (ôn Bài 4). HashMap mặc định, put tới phần tử thứ 25 thì <code>table.length</code> thành?</p>
+  <div class="opts"><button>32</button><button>64</button></div>
+  <div class="explain">Bảng 32 ô có threshold 24. Lần put thứ 25 làm size vượt 24, nên bảng gấp đôi lên 64.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q2. Trong method <code>static int add(int a, int b)</code>, tham số <code>a</code> nằm ở local slot nào?</p>
+  <div class="opts"><button>0</button><button>1</button></div>
+  <div class="explain">Method static không có <code>this</code>, nên tham số bắt đầu từ slot 0 (JVMS §2.6.1). Nếu là method instance thì <code>a</code> sẽ ở slot 1.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q3. Instruction nào đẩy một <em>reference</em> từ biến local lên operand stack?</p>
+  <div class="opts"><button>iload</button><button>aload</button><button>ldc</button></div>
+  <div class="explain">Tiền tố <code>a</code> là reference. <code>ldc</code> nạp hằng từ constant pool, không phải từ biến local.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q4. Sau <code>new Person</code> + <code>dup</code>, instruction nào gọi constructor?</p>
+  <div class="opts"><button>invokestatic</button><button>invokespecial</button><button>invokevirtual</button></div>
+  <div class="explain">Constructor là method đặc biệt <code>&lt;init&gt;</code> và được gọi bằng <code>invokespecial</code>.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q5. <code>"hi" == "hi" ? "same" : "diff"</code> biên dịch thành gì?</p>
+  <div class="opts"><button>một lệnh ldc duy nhất</button><button>một phép so sánh runtime</button></div>
+  <div class="explain">Đây là biểu thức hằng nên được tính lúc compile. Bytecode chỉ còn <code>ldc "same"</code>.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q6. Trước <code>invokestatic rename</code>, bytecode đẩy gì lên operand stack?</p>
+  <div class="opts"><button>bản copy toàn bộ object</button><button>giá trị tham chiếu an</button></div>
+  <div class="explain"><code>aload_3</code> đẩy giá trị tham chiếu đang nằm trong slot 3. Object vẫn ở nguyên trên heap.</div>
+</div>
+
+<div class="quiz-score"></div>
+
+<h2>8. Tự làm</h2>
+<p>Tạo file của riêng bạn có method <code>void swap(Person x, Person y)</code> như ở Bài 1, rồi <code>javap -c</code> nó. Bạn sẽ thấy chỉ có <code>aload</code>/<code>astore</code> giữa các slot <em>của frame swap</em>, và không có instruction nào chạm được tới biến của người gọi.</p>
+
+<hr>
+<div class="box key"><p><strong>Nguồn chính nên đọc:</strong> <a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-6.html">JVMS Chapter 6: The JVM Instruction Set</a>. Đừng đọc hết; mỗi khi gặp một instruction lạ trong <code>javap</code>, hãy tra đúng mục của nó. Hướng dẫn công cụ: <a href="https://dev.java/learn/jvm/tools/core/javap/">dev.java: javap</a>.</p></div>
+<p class="next"><strong>Cheat sheet:</strong> <a href="../reference/bytecode-va-gc.html">Bytecode &amp; GC</a><br><strong>Bài tiếp:</strong> <a href="0006-garbage-collection.html">Bài 6: Garbage Collection</a>: khi nào object “chết”, và vì sao Java vẫn có memory leak.</p>
+<p class="ask">Gặp instruction lạ trong output <code>javap</code> của bạn? Dán nó vào terminal và hỏi mình. Làm xong quiz thì báo kết quả nhé.</p>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

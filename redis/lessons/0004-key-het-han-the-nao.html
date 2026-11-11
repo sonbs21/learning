@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key hết hạn thế nào</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Redis · Bài 4 · <a href="0003-cung-la-hash-khac-bo-nho.html">← Bài 3</a> · <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></nav>
+
+<h1>Key hết hạn thế nào</h1>
+<p class="subtitle">TTL về 0 không có nghĩa là key biến mất ngay lúc đó. Và chỉ một lệnh <code>SET</code> vô tình cũng xoá mất TTL của key. ~15 phút.</p>
+
+<div class="box goal">
+  <span class="label">Sau bài này bạn sẽ</span>
+  Giải thích được hai cơ chế xoá key hết hạn, quan sát Redis tự dọn 100 000 key không ai đọc tới, và tránh được hai lỗi production: <strong>mất TTL khi ghi đè</strong> và <strong>hàng loạt key hết hạn cùng lúc</strong>.
+</div>
+
+<h2>1. Hai cơ chế: thụ động và chủ động</h2>
+<p>Redis không đặt hẹn giờ riêng cho từng key, vì hàng triệu bộ hẹn giờ sẽ tốn quá nhiều chi phí. Thay vào đó, Redis dùng <a href="https://redis.io/docs/latest/commands/expire/">hai cơ chế</a>:</p>
+<div class="table-wrap"><table>
+<tr><th>Cơ chế</th><th>Khi nào chạy</th><th>Điểm yếu</th></tr>
+<tr><td><strong>Passive</strong> (thụ động)</td><td>Khi có client truy cập key, Redis kiểm tra key đã hết hạn chưa. Hết hạn thì xoá luôn và trả về <code>nil</code>.</td><td>Key không ai đọc tới sẽ nằm mãi trong RAM.</td></tr>
+<tr><td><strong>Active</strong> (chủ động)</td><td>Định kỳ, Redis lấy ngẫu nhiên một số key có TTL ra kiểm tra và xoá những key đã hết hạn. Nếu tỷ lệ hết hạn trong mẫu cao thì lặp lại ngay.</td><td>Là lấy mẫu xác suất: luôn còn một phần nhỏ key "đã chết" chưa bị dọn.</td></tr>
+</table></div>
+<p>Tần suất chạy của cơ chế active gắn với tham số <code>hz</code>, mặc định là <code>10</code> (10 lần mỗi giây). Bạn sẽ kiểm tra giá trị này trong lab. Tài liệu bản cũ mô tả chi tiết thuật toán: lấy 20 key, nếu trên 25% đã hết hạn thì lặp lại. Các con số này có thể đã thay đổi ở phiên bản mới, nên đừng học thuộc. Chỉ cần nhớ đây là <strong>lấy mẫu ngẫu nhiên và tự điều chỉnh</strong>.</p>
+
+<h3>Replica không tự xoá key hết hạn</h3>
+<p>Khi key hết hạn trên primary, primary gửi lệnh <code>DEL</code> xuống các replica (và ghi vào AOF). Replica <a href="https://redis.io/docs/latest/commands/expire/">không tự xoá key mà chờ lệnh DEL từ master</a>. Mọi việc xoá key hết hạn đều do một nơi quyết định. Bạn sẽ gặp lại chi tiết này ở phần replication.</p>
+
+<h2>2. Lab (~6 phút)</h2>
+<ol class="steps">
+<li>Tham số của cơ chế active:
+<pre><code>docker exec redis-lab redis-cli CONFIG GET hz                    <span class="c">10</span>
+docker exec redis-lab redis-cli CONFIG GET active-expire-effort  <span class="c">1   (thang 1–10, càng cao càng dọn mạnh, càng tốn CPU)</span></code></pre></li>
+<li>Tạo 100 000 key sống 2 giây, rồi <em>không đọc tới chúng nữa</em>. Script Lua chạy vòng lặp ngay trên server, nên không tốn 100 000 lần đi về (nhớ lại <a href="0002-ke-thu-la-round-trip.html">bài 2</a>):
+<pre><code>docker exec redis-lab redis-cli EVAL "for i=1,100000 do redis.call('SET','tmp:'..i,'x','EX',2) end" 0
+docker exec redis-lab redis-cli INFO keyspace
+<span class="c">db0:keys=100000,expires=100000,avg_ttl=1850</span></code></pre></li>
+<li>Đợi 3 giây rồi xem lại:
+<pre><code>docker exec redis-lab redis-cli DBSIZE                       <span class="c">0</span>
+docker exec redis-lab redis-cli INFO stats | grep expired_   <span class="c">expired_keys:100000 …</span></code></pre>
+Không client nào đọc tới các key đó, vậy mà chúng vẫn bị xoá. Đó là cơ chế active.</li>
+<li><strong>Bẫy mất TTL.</strong> Ghi đè bằng <code>SET</code> sẽ xoá TTL; lệnh sửa tại chỗ như <code>INCR</code> thì giữ nguyên (<a href="https://redis.io/docs/latest/commands/expire/">docs EXPIRE</a>):
+<pre><code>SET counter 1 EX 100
+INCR counter        →  TTL counter   <span class="c">~100  (giữ TTL)</span>
+SET counter 5       →  TTL counter   <span class="c">-1    (TTL đã mất!)</span></code></pre></li>
+</ol>
+
+<h2>3. Hai lỗi production kinh điển</h2>
+<h3>Lỗi 1: mất TTL vì ghi đè</h3>
+<pre><code><span class="c">// Lần đầu: có TTL</span>
+redisTemplate.opsForValue().set("product:7", json, Duration.ofMinutes(10));
+<span class="c">// Ở chỗ khác, khi cập nhật: quên TTL → key thành vĩnh viễn</span>
+redisTemplate.opsForValue().set("product:7", newJson);</code></pre>
+<p>Hệ quả: RAM tăng dần mãi, dữ liệu cũ không bao giờ hết hạn. Tìm ra bằng <code>TTL key</code> trả về <code>-1</code> (đã học ở <a href="0001-mot-luong-xu-ly-tat-ca.html">bài 1</a>), hoặc so sánh <code>keys</code> với <code>expires</code> trong <code>INFO keyspace</code>.</p>
+
+<h3>Lỗi 2: hàng loạt key hết hạn cùng một lúc</h3>
+<p>Job warm-up nạp 1 triệu key lúc 00:00, tất cả <code>EX 3600</code>. Đúng 01:00, chúng hết hạn cùng lúc, mọi request đều miss cache và đổ thẳng xuống database. Hiện tượng này gọi là <strong>cache avalanche</strong>. Cách phòng phổ biến là cộng thêm một khoảng ngẫu nhiên (<em>jitter</em>) vào TTL, ví dụ <code>3600 + random(0..300)</code>, để các key hết hạn rải rác. Phần pattern sẽ đào sâu chủ đề này.</p>
+
+<h2>4. Tự kiểm tra</h2>
+<p class="quiz-score">Điểm: 0/5</p>
+
+<div class="quiz" data-correct="0">
+  <p class="q">Có 1 triệu key đã hết hạn và không client nào đọc lại. Điều gì sẽ dọn chúng khỏi RAM?</p>
+  <button>Cơ chế active lấy mẫu ngẫu nhiên định kỳ</button>
+  <button>Cơ chế passive khi client truy cập key</button>
+  <button>Mỗi key có một bộ hẹn giờ riêng biệt</button>
+  <p class="explain">Passive chỉ chạy khi có client truy cập. Key không ai đọc tới được cơ chế active dọn dần, đúng như lab: DBSIZE về 0 dù không ai đọc.</p>
+</div>
+
+<div class="quiz" data-correct="2">
+  <p class="q">Key có <code>EX 600</code>. Code chạy <code>SET key newValue</code> (không kèm EX). TTL bây giờ là bao nhiêu?</p>
+  <button>Vẫn còn khoảng 600 giây như trước đó</button>
+  <button>Được đặt lại về đúng 600 giây mới</button>
+  <button>Trả về -1, key không còn hạn nữa</button>
+  <p class="explain">Lệnh ghi đè toàn bộ value sẽ xoá timeout. Luôn truyền <code>Duration</code> khi set lại một key cache.</p>
+</div>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Primary và replica: key <code>session:9</code> vừa hết hạn. Ai xoá key đó trên replica?</p>
+  <button>Replica tự xoá theo đồng hồ của nó</button>
+  <button>Primary gửi lệnh DEL xuống replica</button>
+  <button>Không ai xoá, replica giữ key mãi</button>
+  <p class="explain">Việc xoá key hết hạn do master quyết định: master sinh lệnh DEL và gửi cho replica (và AOF).</p>
+</div>
+
+<div class="quiz" data-correct="2">
+  <p class="q">1 triệu key cùng <code>EX 3600</code> được nạp cùng lúc. Một giờ sau DB bị quá tải. Cách phòng nào hợp lý?</p>
+  <button>Tăng <code>hz</code> lên 500 để dọn key nhanh hơn</button>
+  <button>Bỏ TTL đi để key không bao giờ hết hạn</button>
+  <button>Cộng thêm jitter ngẫu nhiên vào từng TTL</button>
+  <p class="explain">Vấn đề là các key hết hạn <em>đồng loạt</em>. Jitter rải thời điểm hết hạn ra. Bỏ TTL thì RAM phình mãi; tăng hz không giải quyết được việc miss cache đồng loạt.</p>
+</div>
+
+<div class="quiz" data-correct="1">
+  <p class="q"><em>Ôn bài 3:</em> Lệnh nào cho biết hash <code>user:1</code> đang được lưu dạng listpack hay hashtable?</p>
+  <button><code>MEMORY USAGE user:1</code></button>
+  <button><code>OBJECT ENCODING user:1</code></button>
+  <button><code>TYPE user:1</code> trên Redis 7</button>
+  <p class="explain"><code>TYPE</code> chỉ trả về "hash"; <code>MEMORY USAGE</code> trả về số byte; <code>OBJECT ENCODING</code> mới cho biết cấu trúc bên trong.</p>
+</div>
+
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://redis.io/docs/latest/commands/expire/">EXPIRE, redis.io</a>. Đọc mục <em>"How Redis expires keys"</em> và <em>"How expires are handled in the replication link and AOF file"</em>.</p>
+<div class="box"><span class="label">Hỏi thầy</span>Hỏi agent nếu còn thắc mắc, ví dụ: <em>"Spring <code>@Cacheable</code> đặt TTL ở đâu?"</em> hoặc <em>"nếu RAM đầy key hết hạn có bị xoá trước không?"</em> (câu sau là chủ đề của bài 6).</div>
+
+<footer>← <a href="0003-cung-la-hash-khac-bo-nho.html">Bài 3</a> · Bài tiếp: <a href="0005-transaction-khong-rollback.html">Bài 5: Transaction không có rollback</a> →<br>Tham khảo: <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></footer>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

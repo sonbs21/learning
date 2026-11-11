@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration và Bean</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>@Configuration &amp; @Bean</h1>
+<p class="subtitle">Bài 3 · Tạo bean cho class mà bạn không thể (hoặc không nên) gắn <code>@Component</code></p>
+<div class="meta"><span>~35 phút</span><span>Cần: <a href="0002-chon-bean-primary-qualifier.html">Bài 2</a></span><span>Lab: <code>./lab</code></span></div>
+
+<p>Cho đến giờ, mọi bean đều là class do <em>bạn</em> viết, và bạn chỉ việc gắn <code>@Component</code> lên đó. Nhưng app thật luôn cần object từ <strong>thư viện</strong>: <code>Clock</code>, <code>ObjectMapper</code>, <code>RestClient</code>, connection pool… Bạn không mở được mã nguồn của chúng để thêm annotation. Vậy làm sao biến chúng thành bean?</p>
+
+<h2>1 · Ý tưởng: viết một method tạo object, rồi giao cho Spring</h2>
+<pre><code>@Configuration                       // "class này chứa các công thức tạo bean"
+public class AppConfig {
+
+    @Bean                            // "object mà method này trả về là một bean"
+    public Clock clock() {
+        return Clock.systemDefaultZone();
+    }
+}</code></pre>
+<ol class="flow">
+  <li>Spring quét thấy <code>AppConfig</code> vì <code>@Configuration</code> cũng là một dạng <code>@Component</code>.</li>
+  <li>Spring gọi method <code>clock()</code> <strong>một lần</strong> và đưa object trả về vào container.</li>
+  <li>Tên bean mặc định là <strong>tên method</strong>, ở đây là <code>clock</code>. <a class="cite" href="https://docs.spring.io/spring-framework/reference/core/beans/java/bean-annotation.html">[docs]</a></li>
+  <li>Từ đó, bất kỳ constructor nào cần <code>Clock</code> đều được tiêm bean này, giống hệt bean tạo bằng <code>@Component</code>.</li>
+</ol>
+
+<table>
+  <tr><th></th><th><code>@Component</code></th><th><code>@Bean</code></th></tr>
+  <tr><td>Đặt ở</td><td>Trên class</td><td>Trên method trong class <code>@Configuration</code></td></tr>
+  <tr><td>Ai gọi <code>new</code></td><td>Spring gọi constructor</td><td>Bạn tự viết code tạo object</td></tr>
+  <tr><td>Dùng khi</td><td>Class do bạn viết</td><td>Class của thư viện, hoặc cách tạo object cần logic</td></tr>
+</table>
+
+<div class="callout">
+  <strong><code>@Service</code>, <code>@Repository</code>, <code>@Controller</code> là gì?</strong>
+  Về kỹ thuật, cả ba vẫn là <code>@Component</code> mang tên rõ nghĩa hơn, dùng để báo cho người đọc biết class đó thuộc tầng nào (business logic, truy cập dữ liệu, web). <a class="cite" href="https://docs.spring.io/spring-framework/reference/core/beans/classpath-scanning.html">[docs]</a> Từ bài này, ta sẽ dùng <code>@Service</code> cho <code>OrderService</code>.
+</div>
+
+<hr>
+
+<h2>2 · Thực hành</h2>
+<div class="lab">
+<h3>Lab 3 · ~20 phút</h3>
+<p>Yêu cầu mới: mỗi đơn hàng phải ghi kèm <strong>thời điểm đặt</strong>.</p>
+<ol>
+  <li>Sửa <code>OrderService</code>: đổi <code>@Component</code> thành <code>@Service</code> (import <code>org.springframework.stereotype.Service</code>) và nhận thêm một <code>Clock</code>:
+<pre><code>package dev.lab;
+
+import java.time.Clock;
+import java.time.LocalDateTime;
+import org.springframework.stereotype.Service;
+
+<span class="hl">@Service</span>
+public class OrderService {
+
+    private final EmailSender emailSender;
+    private final Clock clock;
+
+    public OrderService(EmailSender emailSender, <span class="hl">Clock clock</span>) {
+        this.emailSender = emailSender;
+        this.clock = clock;
+    }
+
+    public void placeOrder(String customer) {
+        System.out.println("Đã tạo đơn hàng cho " + customer + " lúc " + LocalDateTime.now(clock));
+        emailSender.send(customer, "Cảm ơn bạn đã đặt hàng!");
+    }
+}</code></pre>
+  Chạy luôn, <em>trước</em> khi tạo <code>AppConfig</code>. <strong>Đoán trước:</strong> lỗi gì sẽ xảy ra, và ở tham số thứ mấy?</li>
+
+  <li>Tạo <code>AppConfig.java</code>:
+<pre><code>package dev.lab;
+
+import java.time.Clock;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class AppConfig {
+
+    @Bean
+    public Clock clock() {
+        return Clock.systemDefaultZone();
+    }
+}</code></pre>
+  Chạy lại. Lần này đơn hàng có in ra giờ hiện tại không?</li>
+
+  <li><strong>Đồng hồ giả.</strong> Đổi nội dung method <code>clock()</code> thành:
+<pre><code>return Clock.fixed(Instant.parse("2026-01-01T08:00:00Z"), ZoneOffset.UTC);</code></pre>
+  (import <code>java.time.Instant</code> và <code>java.time.ZoneOffset</code>). Chạy lại vài lần. Để ý là <code>OrderService</code> không phải sửa dòng nào.</li>
+
+  <li><strong>Xem tên bean.</strong> Thêm vào cuối <code>main</code>:
+<pre><code>System.out.println("Bean tên clock: " + context.getBean("clock"));</code></pre></li>
+</ol>
+
+<details>
+  <summary>Kết quả mong đợi</summary>
+<pre><code># Bước 1: chưa có bean Clock
+Parameter <span class="bad-hl">1</span> of constructor in dev.lab.OrderService required a bean of type
+'java.time.Clock' that could not be found.
+
+# Bước 2: đồng hồ hệ thống
+Đã tạo đơn hàng cho an@example.com lúc 2026-10-30T22:02:44.105904528
+
+# Bước 3 + 4: đồng hồ cố định, xin bean theo tên
+Đã tạo đơn hàng cho an@example.com lúc 2026-01-01T08:00
+Bean tên clock: FixedClock[2026-01-01T08:00:00Z,Z]</code></pre>
+  <p>"Parameter <strong>1</strong>" có nghĩa là tham số thứ hai, vì Spring đếm từ 0. Tham số 0 (<code>EmailSender</code>) vẫn ổn. Bước 3 cho thấy giá trị thật của DI: <em>đổi một bean là đổi được hành vi của cả app</em>, không phải sửa class nào dùng bean đó. Khi viết test, ta sẽ dùng đúng kỹ thuật này để có thời gian cố định.</p>
+</details>
+
+<p><strong>Trạng thái để sang bài 4:</strong> giữ <code>AppConfig</code> với <code>Clock.fixed(...)</code> và xoá dòng in "Bean tên clock".</p>
+</div>
+
+<hr>
+
+<h2>3 · Kiểm tra trí nhớ</h2>
+<div class="quiz" data-quiz="q3"></div>
+<script type="application/json" id="q3">
+[
+  {
+    "q": "Vì sao không thể gắn <code>@Component</code> lên <code>java.time.Clock</code>?",
+    "options": [
+      "Clock là abstract class nên Spring không quản lý được",
+      "Spring cấm đặt annotation lên các class thuộc package java",
+      "Clock thuộc JDK nên bạn không sửa được mã nguồn"
+    ],
+    "answer": 2,
+    "why": "Annotation phải được viết trong mã nguồn của class, mà mã nguồn của JDK thì bạn không sửa được. <code>@Bean</code> giải quyết việc này: bạn tự viết code tạo object rồi giao nó cho Spring."
+  },
+  {
+    "q": "Bean được tạo từ method <code>@Bean public Clock clock()</code> có tên mặc định là gì?",
+    "options": [
+      "clock, chính là tên của method có gắn @Bean",
+      "appConfig, chính là tên của class chứa method đó",
+      "java.time.Clock, là tên đầy đủ của kiểu trả về"
+    ],
+    "answer": 0,
+    "why": "Với <code>@Bean</code>, tên bean mặc định là tên method. Còn <code>appConfig</code> là tên của chính bean cấu hình."
+  },
+  {
+    "q": "Lợi ích rõ nhất khi đổi bean thành <code>Clock.fixed(...)</code> là gì?",
+    "options": [
+      "App chạy nhanh hơn vì không phải đọc đồng hồ hệ thống",
+      "Thời gian cố định nên kết quả dễ kiểm tra khi test",
+      "Spring tự đồng bộ giờ với các server chuẩn trên mạng Internet"
+    ],
+    "answer": 1,
+    "why": "Thời gian có thể đoán trước thì test mới viết được kết quả mong đợi. Ta làm được điều này mà không phải sửa <code>OrderService</code>, nhờ DI."
+  },
+  {
+    "q": "Về mặt kỹ thuật, <code>@Service</code> khác <code>@Component</code> ở điểm nào?",
+    "options": [
+      "@Service tự động mở transaction cho mọi method public trong class đó",
+      "@Service tạo một bean mới cho mỗi lần gọi, khác với @Component",
+      "Gần như không khác, @Service chỉ là @Component mang tên rõ nghĩa"
+    ],
+    "answer": 2,
+    "why": "<code>@Service</code> là một \"stereotype\" của <code>@Component</code>: nó giúp người đọc hiểu vai trò của class. Transaction thì cần <code>@Transactional</code>, một chủ đề sau này."
+  }
+]
+</script>
+
+<h2>4 · Thử thách</h2>
+<ol>
+  <li>App cần một <code>ObjectMapper</code> (thư viện Jackson) được cấu hình riêng. Viết vào chat đoạn code tạo bean đó.</li>
+  <li><em>Ôn bài 2:</em> <code>@Primary</code> và <code>@Qualifier</code>, cái nào đặt trên class được chọn, cái nào đặt ở chỗ nhận bean?</li>
+</ol>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html">Spring Framework Reference: Basic Concepts: @Bean and @Configuration</a>, khoảng 5 phút.</p>
+<p>Tra nhanh: <a href="../reference/ioc-di.html">Cheat sheet: IoC, DI &amp; Bean</a>.</p>
+<p class="ask">Có gì chưa rõ thì cứ hỏi teacher (Claude). Ví dụ: "Nếu cả @Component và @Bean cùng tạo một kiểu thì sao?"</p>
+
+<div class="footer-nav no-print">
+  <a href="0002-chon-bean-primary-qualifier.html">← Bài 2: Chọn bean</a>
+  <a href="0004-scope-va-vong-doi-bean.html">Bài 4: Scope &amp; vòng đời →</a>
+</div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

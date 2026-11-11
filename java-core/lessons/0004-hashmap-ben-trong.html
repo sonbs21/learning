@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 4 · HashMap bên trong</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../reference/lo-trinh.html">Lộ trình</a> · Bài 4 · <a href="0003-hop-dong-equals-hashcode.html">← Bài 3</a> · <a href="0005-doc-bytecode-voi-javap.html">Bài 5 →</a> · <a href="../reference/thuat-ngu.html">Thuật ngữ</a></nav>
+
+<h1>HashMap bên trong hoạt động thế nào</h1>
+<p class="subtitle">Mảng bucket, hàm hash, collision, treeify và resize, đọc thẳng từ source OpenJDK 21.</p>
+
+<div class="goal">
+  <strong>Sau bài này bạn sẽ</strong>
+  Trả lời trọn vẹn câu phỏng vấn kinh điển “Giải thích cơ chế hoạt động của HashMap” với các con số chính xác (16, 0.75, 8, 64) và biết mỗi con số nằm ở dòng nào trong source.
+</div>
+
+<details class="recall">
+  <summary>Ôn lại Bài 2–3</summary>
+  <p>(1) HashMap so sánh <code>hash</code> trước hay <code>equals</code> trước? (2) Vì sao key nên là immutable? (3) <code>==</code> giữa hai reference so sánh gì?</p>
+  <p><em>Đáp án:</em> (1) So hash trước, rồi mới tới <code>==</code> hoặc <code>equals</code>. (2) Hash được tính và lưu lúc put; sửa key sau đó thì tìm sai ngăn. (3) So hai mũi tên: có cùng object không.</p>
+</details>
+
+<h2>1. Cấu trúc: một mảng các danh sách</h2>
+<p>Bên trong HashMap có một field <code>Node&lt;K,V&gt;[] table</code>. Mỗi ô của mảng là một <strong>bucket</strong>, chứa một linked list các <code>Node</code>. Mỗi node gồm <code>hash</code>, <code>key</code>, <code>value</code> và <code>next</code>.</p>
+
+<figure>
+<svg viewBox="0 0 640 240" role="img" aria-labelledby="d4t">
+  <title id="d4t">Mảng table 16 ô; bucket 0 chứa Aa rồi BB; bucket 5 chứa Bình rồi Chi; bucket 13 chứa An</title>
+  <defs><marker id="ah4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+  <text class="label heap-t" x="60" y="26">table (length = 16), một object trên heap</text>
+  <g>
+    <rect class="obj" x="60" y="38" width="32" height="30"/><rect class="obj" x="95" y="38" width="32" height="30"/><rect class="obj" x="130" y="38" width="32" height="30"/><rect class="obj" x="165" y="38" width="32" height="30"/>
+    <rect class="obj" x="200" y="38" width="32" height="30"/><rect class="obj" x="235" y="38" width="32" height="30"/><rect class="obj" x="270" y="38" width="32" height="30"/><rect class="obj" x="305" y="38" width="32" height="30"/>
+    <rect class="obj" x="340" y="38" width="32" height="30"/><rect class="obj" x="375" y="38" width="32" height="30"/><rect class="obj" x="410" y="38" width="32" height="30"/><rect class="obj" x="445" y="38" width="32" height="30"/>
+    <rect class="obj" x="480" y="38" width="32" height="30"/><rect class="obj" x="515" y="38" width="32" height="30"/><rect class="obj" x="550" y="38" width="32" height="30"/><rect class="obj" x="585" y="38" width="32" height="30"/>
+  </g>
+  <text class="muted-t" x="72" y="84">0</text><text class="muted-t" x="247" y="84">5</text><text class="muted-t" x="523" y="84">13</text><text class="muted-t" x="593" y="84">15</text>
+  <rect class="obj" x="28" y="110" width="96" height="36" rx="4"/><text x="38" y="133">"Aa" 2112</text>
+  <rect class="obj" x="28" y="185" width="96" height="36" rx="4"/><text x="38" y="208">"BB" 2112</text>
+  <rect class="obj" x="203" y="110" width="96" height="36" rx="4"/><text x="216" y="133">"Bình"</text>
+  <rect class="obj" x="203" y="185" width="96" height="36" rx="4"/><text x="216" y="208">"Chi"</text>
+  <rect class="obj" x="483" y="110" width="96" height="36" rx="4"/><text x="503" y="133">"An"</text>
+  <path class="arrow" d="M76,53 L76,108" marker-end="url(#ah4)"/>
+  <path class="arrow" d="M76,146 L76,183" marker-end="url(#ah4)"/><text class="muted-t" x="84" y="170">next</text>
+  <path class="arrow" d="M251,53 L251,108" marker-end="url(#ah4)"/>
+  <path class="arrow" d="M251,146 L251,183" marker-end="url(#ah4)"/><text class="muted-t" x="259" y="170">next</text>
+  <path class="arrow" d="M531,53 L531,108" marker-end="url(#ah4)"/>
+</svg>
+<figcaption>Hình 4. Kết quả thật từ <a href="code/L0004HashMapInside.java">L0004HashMapInside.java</a>. “Aa” và “BB” có <em>cùng hashCode</em>. “Bình” và “Chi” có hashCode <em>khác nhau</em> nhưng vẫn rơi vào cùng bucket 5. Cả hai đều là collision.</figcaption>
+</figure>
+
+<h2>2. <code>put(key, value)</code> từng bước</h2>
+
+<h3>Bước 1: tính hash và “trộn” bit</h3>
+<pre><code>static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h &gt;&gt;&gt; 16);
+}</code></pre>
+<p><a href="https://github.com/openjdk/jdk21u/blob/master/src/java.base/share/classes/java/util/HashMap.java#L336-L339">HashMap.java L336–339</a>. Key <code>null</code> luôn có hash 0, nên HashMap cho phép một key null. Phép <code>^ (h &gt;&gt;&gt; 16)</code> trộn 16 bit cao xuống 16 bit thấp. Comment trong source giải thích lý do: bảng chỉ dùng các bit thấp để chọn bucket, nên những hash chỉ khác nhau ở bit cao “will always collide” nếu không trộn.</p>
+
+<h3>Bước 2: chọn bucket bằng <code>(n - 1) &amp; hash</code></h3>
+<p>Với <code>n = 16</code> thì <code>n − 1 = 15 = 0b1111</code>, nên phép AND giữ lại 4 bit thấp của hash. Kết quả luôn nằm trong 0..15. Khi <code>n</code> là lũy thừa của 2, phép này cho cùng kết quả với chia lấy dư, nhưng nhanh hơn nhiều. Đó là lý do <strong>capacity của HashMap luôn là lũy thừa của 2</strong>.</p>
+
+<h3>Bước 3: bucket rỗng thì đặt node; có rồi thì so sánh</h3>
+<pre><code>if ((p = tab[i = (n - 1) &amp; hash]) == null)
+    tab[i] = newNode(hash, key, value, null);       // bucket rỗng
+else {
+    if (p.hash == hash &amp;&amp;
+        ((k = p.key) == key || (key != null &amp;&amp; key.equals(k))))
+        e = p;                                       // trùng key ⇒ ghi đè value
+    ...                                              // không trùng ⇒ duyệt list, nối vào cuối
+}</code></pre>
+<p><a href="https://github.com/openjdk/jdk21u/blob/master/src/java.base/share/classes/java/util/HashMap.java#L631-L672">HashMap.putVal L631–672</a>. Đây chính là chỗ hợp đồng ở <a href="0003-hop-dong-equals-hashcode.html">Bài 3</a> phát huy tác dụng.</p>
+
+<h3>Bước 4: list quá dài thì treeify</h3>
+<p>Nếu sau khi nối thêm, bucket có từ <code>TREEIFY_THRESHOLD = 8</code> node trở lên, HashMap gọi <code>treeifyBin</code> để biến list thành cây đỏ-đen, giúp tìm kiếm còn O(log n) thay vì O(n). Nhưng có một ngoại lệ ít người biết:</p>
+<pre><code>if (tab == null || (n = tab.length) &lt; MIN_TREEIFY_CAPACITY)   // 64
+    resize();</code></pre>
+<p>Nếu bảng còn nhỏ hơn <strong>64</strong> ô, HashMap <em>không</em> tạo cây mà gấp đôi bảng để rải node ra. Khi số node trong cây giảm xuống <code>UNTREEIFY_THRESHOLD = 6</code> (lúc resize), cây được chuyển lại thành list.</p>
+
+<h3>Bước 5: quá tải thì resize</h3>
+<pre><code>if (++size &gt; threshold)        // threshold = capacity × loadFactor
+    resize();                  // gấp đôi table, chia lại các node</code></pre>
+<p>Mặc định <code>DEFAULT_INITIAL_CAPACITY = 16</code> và <code>DEFAULT_LOAD_FACTOR = 0.75</code>, nên threshold là 12. Kết quả chạy thật:</p>
+<pre><code>sau new HashMap()   : table.length = 0      ← chưa cấp phát (lazy)
+put thứ 1           : table.length 0 -&gt; 16
+put thứ 13          : table.length 16 -&gt; 32
+put thứ 25          : table.length 32 -&gt; 64</code></pre>
+<span class="sidenote">Hệ quả thực tế: nếu biết trước sẽ chứa khoảng 1000 phần tử, hãy dùng <code>HashMap.newHashMap(1000)</code> (có từ Java 19) để tránh nhiều lần resize liên tiếp.</span>
+
+<h2>3. <code>get(key)</code> và độ phức tạp</h2>
+<p><code>get</code> đi lại đúng bước 1–3: tính hash, chọn bucket, rồi so <code>hash</code> và <code>equals</code> dọc theo list hoặc cây. Trung bình là <strong>O(1)</strong>. Nếu rất nhiều key collide vào một bucket thì list cho O(n), còn cây cho O(log n). Vì vậy một <code>hashCode</code> tệ, ví dụ luôn <code>return 1</code>, vẫn <em>đúng</em> hợp đồng nhưng biến HashMap thành chậm như duyệt list.</p>
+
+<div class="box"><p><strong>Lưu ý:</strong> <code>HashMap</code> không thread-safe. Nhiều thread cùng <code>put</code> có thể làm mất dữ liệu. Môi trường đa luồng thì dùng <code>ConcurrentHashMap</code>; chủ đề này sẽ có ở phần concurrency.</p></div>
+
+<h2>4. Luyện tập</h2>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q1 (ôn Bài 1). Mảng <code>table</code> của một HashMap nằm ở đâu?</p>
+  <div class="opts"><button>Trong frame trên stack</button><button>Trong object trên heap</button></div>
+  <div class="explain">Mảng là object nên luôn nằm trên heap. Field <code>table</code> của HashMap chỉ giữ mũi tên trỏ tới nó.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q2. Ngay sau <code>new HashMap&lt;&gt;()</code>, mảng <code>table</code> đã được cấp phát chưa?</p>
+  <div class="opts"><button>Chưa, đợi put đầu</button><button>Rồi, sẵn 16 ô</button></div>
+  <div class="explain"><code>table</code> là null cho tới <code>put</code> đầu tiên, khi đó <code>resize()</code> mới tạo mảng 16 ô (lazy initialization).</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q3. Bảng có 16 ô, hash (đã trộn) của key là 37. Key vào bucket nào?</p>
+  <div class="opts"><button>2</button><button>5</button><button>7</button></div>
+  <div class="explain">37 = 0b100101, AND với 0b1111 ra 0b0101 = 5. Cũng bằng 37 % 16.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q4. HashMap mặc định resize lần đầu (16 lên 32) ở lần put thứ mấy?</p>
+  <div class="opts"><button>13</button><button>12</button><button>16</button></div>
+  <div class="explain">threshold = 16 × 0.75 = 12. Điều kiện là <code>++size &gt; threshold</code>, nên resize xảy ra khi size thành 13.</div>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">Q5. Bảng dài 16, một bucket đã có 8 node, put thêm key thứ 9 vào bucket đó. HashMap làm gì?</p>
+  <div class="opts"><button>chuyển bucket thành cây</button><button>chỉ nối vào linked list</button><button>gấp đôi kích thước bảng</button></div>
+  <div class="explain">Node mới được nối vào list, rồi <code>treeifyBin</code> được gọi. Nhưng vì 16 &lt; <code>MIN_TREEIFY_CAPACITY</code> (64), nó gọi <code>resize()</code> thay vì tạo cây.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q6. Vì sao capacity của HashMap luôn là lũy thừa của 2?</p>
+  <div class="opts"><button>để dùng &amp; thay phép %</button><button>để tiết kiệm bộ nhớ heap</button><button>để giảm số lần gọi equals</button></div>
+  <div class="explain">Với n = 2^k thì <code>(n-1) &amp; hash</code> cho cùng kết quả với <code>hash % n</code> (khi hash không âm) nhưng nhanh hơn nhiều, và luôn ra chỉ số hợp lệ kể cả khi hash âm.</div>
+</div>
+
+<div class="quiz-score"></div>
+
+<h2>5. Chạy thử</h2>
+<pre><code>java --add-opens java.base/java.util=ALL-UNNAMED lessons/code/L0004HashMapInside.java</code></pre>
+<p>Cờ <code>--add-opens</code> cho phép reflection đọc field private <code>table</code> (<a href="code/L0004HashMapInside.java">mở file</a>). Thử thêm: đổi vòng lặp thành <code>new HashMap&lt;&gt;(100)</code> và đoán xem <code>table.length</code> ban đầu sẽ là bao nhiêu (gợi ý: lũy thừa của 2 gần nhất ≥ 100).</p>
+
+<hr>
+<div class="box key"><p><strong>Nguồn chính nên đọc:</strong> <a href="https://github.com/openjdk/jdk21u/blob/master/src/java.base/share/classes/java/util/HashMap.java">HashMap.java (OpenJDK 21)</a>. Đọc block comment “Implementation notes” (khoảng dòng 140–230) và method <code>putVal</code>. Đọc được source JDK là kỹ năng phân biệt rõ người “dùng” với người “hiểu”.</p></div>
+<p class="next"><strong>Cheat sheet:</strong> <a href="../reference/equals-hashcode-hashmap.html">equals · hashCode · HashMap</a><br><strong>Bài tiếp:</strong> <a href="0005-doc-bytecode-voi-javap.html">Bài 5: đọc bytecode với javap</a>, để tận mắt kiểm chứng những gì đã học.</p>
+<p class="ask">Câu hỏi kiểu “resize chia lại node thế nào?” hay “vì sao lại là cây đỏ-đen?” rất đáng hỏi, cứ hỏi mình. Làm xong quiz thì báo kết quả nhé.</p>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

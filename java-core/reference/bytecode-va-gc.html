@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bytecode và GC</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="lo-trinh.html">Lộ trình</a> · Reference · Từ <a href="../lessons/0005-doc-bytecode-voi-javap.html">Bài 5</a>–<a href="../lessons/0006-garbage-collection.html">6</a></nav>
+<h1>Bytecode &amp; GC</h1>
+<p class="subtitle">Tra nhanh khi đọc <code>javap</code> hoặc log GC.</p>
+
+<h2>Lệnh</h2>
+<pre><code>javac -d out File.java &amp;&amp; javap -c -p -cp out ClassName   # xem bytecode
+java -Xlog:gc File.java                                    # log GC
+java -Xmx64m ...                                           # giới hạn heap
+java -XX:+PrintCommandLineFlags -version                   # xem GC mặc định</code></pre>
+
+<h2>Instruction hay gặp</h2>
+<div class="table-wrap"><table>
+<tr><th>Instruction</th><th>Làm gì</th></tr>
+<tr><td><code>iload_n / aload_n</code></td><td>Đẩy int / reference từ local slot n lên operand stack</td></tr>
+<tr><td><code>istore_n / astore_n</code></td><td>Lấy từ operand stack, cất vào slot n</td></tr>
+<tr><td><code>iconst_n / bipush / ldc</code></td><td>Đẩy hằng (số nhỏ / byte / từ constant pool, gồm cả String literal)</td></tr>
+<tr><td><code>iadd, isub, imul…</code></td><td>Lấy 2 toán hạng, tính, đẩy kết quả</td></tr>
+<tr><td><code>new</code> → <code>dup</code> → <code>invokespecial &lt;init&gt;</code></td><td>Cấp phát, nhân đôi tham chiếu, gọi constructor</td></tr>
+<tr><td><code>getfield / putfield</code></td><td>Đọc / ghi field của object (đi theo tham chiếu)</td></tr>
+<tr><td><code>invokestatic / invokevirtual</code></td><td>Gọi method static / method instance (dynamic dispatch)</td></tr>
+<tr><td><code>invokedynamic makeConcatWithConstants</code></td><td>Nối chuỗi lúc runtime (Java 9+)</td></tr>
+<tr><td><code>ireturn / areturn / return</code></td><td>Trả về int / reference / void</td></tr>
+</table></div>
+<p>Slot 0 là <code>this</code> (method instance) hoặc tham số đầu tiên (method static).</p>
+
+<h2>GC</h2>
+<div class="box key"><p><strong>Rác = không còn reachable từ GC roots</strong> (biến local của các thread đang sống, field static…). Tham chiếu vòng không cứu được object. <code>System.gc()</code> chỉ là gợi ý.<br><strong>Leak trong Java = object vô dụng nhưng vẫn reachable.</strong></p></div>
+<div class="table-wrap"><table>
+<tr><th>Khái niệm</th><th>Ý nghĩa</th></tr>
+<tr><td>Weak generational hypothesis</td><td>Đa số object chết trẻ</td></tr>
+<tr><td>Young gen (eden + survivor)</td><td>Nơi cấp phát object mới; được dọn thường xuyên và rẻ</td></tr>
+<tr><td>Old gen</td><td>Object sống lâu, được thăng cấp từ young gen</td></tr>
+<tr><td>G1</td><td>Collector mặc định; heap chia thành các region</td></tr>
+<tr><td>Humongous object</td><td>Object ≥ nửa region, cấp phát thẳng vào old gen</td></tr>
+</table></div>
+<pre><code>GC(3) Pause Young (Normal) (G1 Evacuation Pause) 11M-&gt;3M(17M) 0.379ms
+      loại collection                            trước-&gt;sau(heap) thời gian dừng</code></pre>
+</main>
+</body>
+</html>

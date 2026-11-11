@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 1 · Stack, Heap và tham chiếu</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../reference/lo-trinh.html">Lộ trình</a> · Bài 1 · <a href="0002-so-sanh-bang-va-equals.html">Bài 2 →</a> ·<a href="../reference/thuat-ngu.html">Thuật ngữ</a> · <a href="../reference/bo-nho-stack-heap.html">Cheat sheet bộ nhớ</a></nav>
+
+<h1>Biến của bạn thật sự nằm ở đâu?</h1>
+<p class="subtitle">Stack, heap và tham chiếu: mô hình bộ nhớ đứng sau gần như mọi câu hỏi phỏng vấn Java.</p>
+
+<div class="goal">
+  <strong>Sau bài này bạn sẽ</strong>
+  Đoán đúng output của mọi câu đố kiểu <em>“Java truyền tham chiếu hay truyền giá trị?”</em> bằng cách vẽ ra stack và heap trong đầu.
+</div>
+
+<p>Các câu như <code>==</code> và <code>equals</code>, HashMap, String immutable, memory leak trong <a href="../../core/phong-van.md">phong-van.md</a> đều quy về một câu hỏi: <strong>khi chạy code, dữ liệu nằm ở đâu và biến chứa cái gì?</strong> Bài này trả lời đúng câu hỏi đó.</p>
+
+<h2>1. Hai vùng nhớ: stack và heap</h2>
+
+<p>Đặc tả JVM (JVMS) chia bộ nhớ lúc chạy thành nhiều vùng. Hai vùng quan trọng nhất là:</p>
+
+<blockquote class="spec">
+  “Each Java Virtual Machine thread has a private Java Virtual Machine stack, created at the same time as the thread. A Java Virtual Machine stack stores frames.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5.2">JVMS §2.5.2</a></cite>
+</blockquote>
+<blockquote class="spec">
+  “The heap is the run-time data area from which memory for all class instances and arrays is allocated.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5.3">JVMS §2.5.3</a></cite>
+</blockquote>
+
+<ul>
+  <li><strong>Stack</strong>: mỗi thread có một stack riêng. Mỗi lần <em>gọi method</em>, JVM đẩy lên một <strong>frame</strong> mới, chứa các <em>biến local</em> và tham số của lần gọi đó. Method chạy xong thì frame bị huỷ (<a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.6">JVMS §2.6</a>).</li>
+  <li><strong>Heap</strong>: dùng chung cho mọi thread. Mọi <strong>object</strong> và <strong>mảng</strong> tạo bằng <code>new</code> đều nằm ở đây. Không ai tự giải phóng chúng; garbage collector sẽ thu hồi khi không còn ai trỏ tới.</li>
+</ul>
+
+<span class="sidenote">Vì frame bị huỷ ngay khi method kết thúc, biến local “chết” theo method. Object trên heap thì sống tiếp, miễn là còn ít nhất một tham chiếu trỏ tới nó.</span>
+
+<h2>2. Biến chứa giá trị, không bao giờ chứa object</h2>
+
+<p>Java chỉ có hai loại kiểu (<a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html">JLS §4</a>):</p>
+<ul>
+  <li><strong>Primitive</strong> (<code>int</code>, <code>double</code>, <code>boolean</code>…): biến chứa <em>chính con số</em> đó.</li>
+  <li><strong>Reference</strong> (mọi class, interface, mảng): biến chứa một <em>giá trị tham chiếu</em>, tức “địa chỉ” của object trên heap, hoặc <code>null</code>.</li>
+</ul>
+
+<blockquote class="spec">
+  “The reference values (often just references) are pointers to these objects, and a special null reference, which refers to no object.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.3.1">JLS §4.3.1</a></cite>
+</blockquote>
+
+<pre><code>int age = 20;
+Person p = new Person("An");
+Person q = p;          // copy GIÁ TRỊ tham chiếu, không copy object</code></pre>
+
+<figure>
+<svg viewBox="0 0 640 250" role="img" aria-labelledby="d1t">
+  <title id="d1t">Frame main trên stack chứa age=20, p và q; p và q cùng trỏ tới một object Person trên heap</title>
+  <defs><marker id="ah1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+  <rect class="region-stack" x="10" y="10" width="280" height="230" rx="8"/>
+  <text class="label stack-t" x="24" y="34">STACK (thread main)</text>
+  <rect class="region-heap" x="350" y="10" width="280" height="230" rx="8"/>
+  <text class="label heap-t" x="364" y="34">HEAP</text>
+
+  <rect class="frame" x="30" y="55" width="240" height="160" rx="4"/>
+  <text class="muted-t" x="42" y="76">frame: main()</text>
+  <text x="42" y="110">age</text><text x="120" y="110">20</text>
+  <text x="42" y="150">p</text><text x="120" y="150">●</text>
+  <text x="42" y="190">q</text><text x="120" y="190">●</text>
+  <line x1="100" y1="92" x2="100" y2="200" stroke="var(--rule)"/>
+
+  <rect class="obj" x="400" y="105" width="200" height="70" rx="4"/>
+  <text class="muted-t" x="412" y="126">Person</text>
+  <text x="412" y="158">name = "An"</text>
+
+  <path class="arrow" d="M132,146 C250,146 300,130 398,130" marker-end="url(#ah1)"/>
+  <path class="arrow" d="M132,186 C250,186 300,155 398,150" marker-end="url(#ah1)"/>
+</svg>
+<figcaption>Hình 1. <code>age</code> chứa số 20. <code>p</code> và <code>q</code> chứa cùng một giá trị tham chiếu, nên cùng chỉ tới <em>một</em> object.</figcaption>
+</figure>
+
+<span class="sidenote">Đơn giản hoá: <code>"An"</code> thực ra cũng là một object <code>String</code> riêng trên heap, và field <code>name</code> chỉ giữ tham chiếu tới nó. Bài 2 sẽ nói kỹ.</span>
+
+<p>Vì <code>p</code> và <code>q</code> cùng trỏ một object, chạy <code>q.name = "Giang"</code> rồi đọc <code>p.name</code> sẽ thấy <code>"Giang"</code>. Ở đây không có hai object nào cả, chỉ có hai “mũi tên” cùng chỉ vào một chỗ.</p>
+
+<div class="box">
+<p><strong>Bẫy hay gặp:</strong> “primitive luôn nằm trên stack” là <em>sai</em>. Một field <code>int age</code> bên trong object <code>Person</code> nằm trong object đó, tức là trên heap. Thứ quyết định vị trí là <em>biến được khai báo ở đâu</em> (biến local hay field), chứ không phải kiểu của nó.</p>
+</div>
+
+<h2>3. Gọi method: luôn luôn là copy giá trị</h2>
+
+<p>Đây là quy tắc chốt cả bài, và nó nằm ngay trong đặc tả ngôn ngữ:</p>
+
+<blockquote class="spec">
+  “When the method or constructor is invoked, the values of the actual argument expressions initialize newly created parameter variables […] before execution of the body.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.4.1">JLS §8.4.1</a></cite>
+</blockquote>
+
+<p>Nói cách khác: gọi <code>m(a)</code> tạo một frame mới, trong đó có một biến tham số <em>mới tinh</em>, rồi <strong>copy giá trị của <code>a</code></strong> vào đó. Nếu <code>a</code> là primitive thì copy con số; nếu <code>a</code> là reference thì copy mũi tên. Vì thế Java <strong>luôn là pass-by-value</strong>. Với object, “value” ở đây chính là giá trị tham chiếu.</p>
+
+<p>Từ một quy tắc đó suy ra được hai hệ quả:</p>
+
+<ol>
+  <li><strong>Sửa object qua tham chiếu thì bên ngoài thấy.</strong> <code>p.name = "Bình"</code> đi theo mũi tên tới object chung và sửa ngay trên object đó.</li>
+  <li><strong>Gán lại tham số thì bên ngoài không thấy.</strong> <code>p = new Person("Bình")</code> chỉ đổi mũi tên trong frame của method. Biến bên ngoài vẫn trỏ object cũ.</li>
+</ol>
+
+<pre><code>static void replace(Person p) { p = new Person("Bình"); }
+
+Person a = new Person("An");
+replace(a);
+System.out.println(a.name);   // An</code></pre>
+
+<figure>
+<svg viewBox="0 0 640 270" role="img" aria-labelledby="d2t">
+  <title id="d2t">Frame replace có biến p trỏ tới Person Bình mới; frame main có a vẫn trỏ Person An; đường nét đứt cho thấy p từng trỏ tới An</title>
+  <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+  <rect class="region-stack" x="10" y="10" width="280" height="250" rx="8"/>
+  <text class="label stack-t" x="24" y="34">STACK</text>
+  <rect class="region-heap" x="350" y="10" width="280" height="250" rx="8"/>
+  <text class="label heap-t" x="364" y="34">HEAP</text>
+
+  <rect class="frame" x="30" y="50" width="240" height="80" rx="4"/>
+  <text class="muted-t" x="42" y="71">frame: replace()  ← đỉnh stack</text>
+  <text x="42" y="108">p</text><text x="120" y="108">●</text>
+
+  <rect class="frame" x="30" y="155" width="240" height="80" rx="4"/>
+  <text class="muted-t" x="42" y="176">frame: main()</text>
+  <text x="42" y="213">a</text><text x="120" y="213">●</text>
+
+  <rect class="obj" x="400" y="60" width="200" height="60" rx="4"/>
+  <text class="muted-t" x="412" y="80">Person (mới)</text>
+  <text x="412" y="106">name = "Bình"</text>
+  <rect class="obj" x="400" y="165" width="200" height="60" rx="4"/>
+  <text class="muted-t" x="412" y="185">Person</text>
+  <text x="412" y="211">name = "An"</text>
+
+  <path class="arrow" d="M132,104 C250,104 300,90 398,90" marker-end="url(#ah2)"/>
+  <path class="arrow dead" d="M132,110 C240,130 300,180 398,185"/>
+  <text class="muted-t" x="250" y="150">p lúc đầu</text>
+  <path class="arrow" d="M132,209 C250,209 300,200 398,200" marker-end="url(#ah2)"/>
+</svg>
+<figcaption>Hình 2. Lúc vào method, <code>p</code> nhận bản copy mũi tên của <code>a</code> (nét đứt). Lệnh <code>p = new …</code> chỉ bẻ mũi tên của <code>p</code>, còn <code>a</code> không hề bị động tới. Khi <code>replace()</code> kết thúc, frame của nó biến mất và object “Bình” không còn ai trỏ tới, nên trở thành rác chờ GC thu hồi.</figcaption>
+</figure>
+
+<span class="sidenote">Ngôn ngữ có pass-by-reference thật, như <code>ref</code> trong C# hay <code>&amp;</code> trong C++, cho phép method gán lại <em>chính biến</em> của người gọi. Java không có cơ chế này. Đó cũng là lý do bạn không thể viết hàm <code>swap(a, b)</code> đổi chỗ hai biến trong Java.</span>
+
+<p>Nhắc thêm cho chính xác: đây là mô hình theo <em>đặc tả</em>. Khi chạy thật, JIT của HotSpot có thể tối ưu (ví dụ escape analysis có thể khiến một object không bao giờ thực sự được cấp phát trên heap), nhưng <strong>hành vi bạn quan sát được luôn giống hệt mô hình này</strong>. Nếu tò mò, xem <a href="https://shipilev.net/jvm/anatomy-quarks/">JVM Anatomy Quarks</a>, nhưng chưa cần ngay bây giờ.</p>
+
+<details class="recall">
+  <summary>Tự kiểm tra trước khi làm quiz: che màn hình lại và trả lời</summary>
+  <p>(1) Gọi method thì cái gì được tạo ra trên stack? (2) Thứ gì được copy vào tham số? (3) Vì sao <code>p.name = …</code> thì bên ngoài thấy, còn <code>p = …</code> thì không?</p>
+  <p><em>Đáp án:</em> (1) Một frame mới, chứa các biến tham số mới. (2) Giá trị của đối số: con số nếu là primitive, giá trị tham chiếu nếu là object. (3) Lệnh thứ nhất đi theo mũi tên và sửa object chung trên heap; lệnh thứ hai chỉ đổi mũi tên nằm trong frame riêng của method.</p>
+</details>
+
+<h2>4. Luyện tập: đoán output</h2>
+<p>Với mỗi câu, hãy <strong>vẽ stack và heap ra giấy</strong> trước khi bấm. Lớp dùng chung:</p>
+<pre><code>class Person { String name; Person(String n) { name = n; } }</code></pre>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q1. In ra gì?</p>
+<pre><code>static void inc(int x) { x = x + 1; }
+int a = 10; inc(a); System.out.println(a);</code></pre>
+  <div class="opts"><button>11</button><button>10</button></div>
+  <div class="explain"><code>x</code> là một biến mới trong frame của <code>inc</code>, nhận bản copy của số 10. Tăng <code>x</code> không ảnh hưởng gì tới <code>a</code>.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q2. In ra gì?</p>
+<pre><code>static void rename(Person p) { p.name = "Bình"; }
+Person a = new Person("An"); rename(a); System.out.println(a.name);</code></pre>
+  <div class="opts"><button>Bình</button><button>An</button></div>
+  <div class="explain"><code>p</code> và <code>a</code> giữ cùng một giá trị tham chiếu. <code>p.name = …</code> đi theo mũi tên và sửa object chung, nên <code>a</code> cũng thấy thay đổi.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q3. In ra gì?</p>
+<pre><code>static void replace(Person p) { p = new Person("Bình"); }
+Person a = new Person("An"); replace(a); System.out.println(a.name);</code></pre>
+  <div class="opts"><button>Bình</button><button>An</button></div>
+  <div class="explain">Chính là Hình 2. Lệnh gán chỉ đổi mũi tên của <code>p</code> trong frame của <code>replace</code>, còn <code>a</code> vẫn trỏ object "An".</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q4. In ra gì?</p>
+<pre><code>static void swap(Person x, Person y) { Person t = x; x = y; y = t; }
+Person a = new Person("An"), b = new Person("Bình");
+swap(a, b); System.out.println(a.name + " " + b.name);</code></pre>
+  <div class="opts"><button>An Bình</button><button>Bình An</button></div>
+  <div class="explain"><code>swap</code> chỉ tráo hai bản copy <code>x</code> và <code>y</code> trong frame của nó. Biến <code>a</code> và <code>b</code> bên ngoài không đổi. Đây là câu phỏng vấn kinh điển để chứng minh Java không có pass-by-reference.</div>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">Q5. In ra gì?</p>
+<pre><code>static void tricky(Person p) {
+    p.name = "Chi";
+    p = new Person("Dũng");
+    p.name = "Em";
+}
+Person a = new Person("An"); tricky(a); System.out.println(a.name);</code></pre>
+  <div class="opts"><button>Em</button><button>Dũng</button><button>Chi</button><button>An</button></div>
+  <div class="explain">Dòng 1 sửa object chung, nên <code>a.name</code> thành "Chi". Dòng 2 bẻ mũi tên <code>p</code> sang một object mới, và từ đây <code>p</code> không còn liên quan tới <code>a</code>. Dòng 3 sửa object mới đó, không phải object của <code>a</code>.</div>
+</div>
+
+<div class="quiz" data-answer="2">
+  <p class="q">Q6. Khi gọi method, thứ gì được copy vào biến tham số?</p>
+  <div class="opts"><button>bản sao toàn bộ object heap</button><button>một alias trỏ tới chính biến</button><button>bản sao giá trị của biến</button></div>
+  <div class="explain">JLS §8.4.1: giá trị của đối số khởi tạo một biến tham số <em>mới</em>. Object không bao giờ bị copy, chỉ giá trị tham chiếu tới nó được copy.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q7. Biến local <code>int count</code> khai báo trong <code>main()</code> nằm ở đâu?</p>
+  <div class="opts"><button>Trong frame trên stack</button><button>Trong object trên heap</button></div>
+  <div class="explain">Biến local và tham số nằm trong mảng local variables của frame (<a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.6.1">JVMS §2.6.1</a>).</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q8. Field <code>int age</code> của một object <code>Person</code> nằm ở đâu?</p>
+  <div class="opts"><button>Trong frame trên stack</button><button>Trong object trên heap</button></div>
+  <div class="explain">Field là một phần của object, và mọi object đều nằm trên heap. Primitive <em>không</em> mặc nhiên nằm trên stack: vị trí phụ thuộc vào chỗ biến được khai báo.</div>
+</div>
+
+<div class="quiz-score"></div>
+
+<h2>5. Chạy thử để kiểm chứng</h2>
+<p>File <a href="code/L0001PassByValue.java"><code>lessons/code/L0001PassByValue.java</code></a> chứa đúng các câu Q1–Q5 ở trên. Từ thư mục <code>java-core/</code>, chạy:</p>
+<pre><code>java lessons/code/L0001PassByValue.java</code></pre>
+<p>Thử thêm: sửa <code>tricky</code> sao cho bên ngoài thấy <code>"Em"</code>, mà <em>không</em> được bỏ dòng <code>p = new Person("Dũng")</code>. Gợi ý: method có thể <code>return</code>.</p>
+
+<hr>
+
+<div class="box key">
+<p><strong>Nguồn chính nên đọc:</strong> <a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5">JVMS §2.5–2.6: Run-Time Data Areas &amp; Frames</a>. Mỗi mục chỉ vài đoạn ngắn. Đọc spec thật ngay từ đầu giúp bạn trả lời phỏng vấn bằng thuật ngữ chính xác, thay vì nhắc lại blog.</p>
+</div>
+
+<p class="next"><strong>Tóm tắt nhanh:</strong> <a href="../reference/bo-nho-stack-heap.html">Cheat sheet stack/heap</a> · <a href="../reference/thuat-ngu.html">Thuật ngữ</a><br>
+<strong>Bài tiếp theo:</strong> <a href="0002-so-sanh-bang-va-equals.html">Bài 2</a>: <code>==</code> và <code>equals()</code>: so sánh mũi tên hay so sánh nội dung, và vì sao <code>"a" == "a"</code> đôi khi lại ra <code>true</code>.</p>
+
+<p class="ask">Có chỗ nào chưa rõ, ví dụ “frame cụ thể trông như thế nào?” hay “nếu đối số là mảng thì sao?”, cứ hỏi lại mình ngay trong terminal. Mình là giáo viên của bạn trong khoá này. Làm quiz xong, hãy báo lại cho mình số câu đúng và câu nào khiến bạn phân vân.</p>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AOF và độ bền</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Redis · Bài 8 · <a href="0007-rdb-va-fork.html">← Bài 7</a> · <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></nav>
+
+<h1>AOF và câu hỏi "mất bao nhiêu dữ liệu?"</h1>
+<p class="subtitle">RDB có thể làm mất dữ liệu của vài phút. AOF thu hẹp con số đó xuống còn khoảng một giây. Còn trên ElastiCache thì câu trả lời lại khác. ~15 phút.</p>
+
+<div class="box goal">
+  <span class="label">Sau bài này bạn sẽ</span>
+  Mở file AOF ra đọc tận mắt, chọn được <code>appendfsync</code> phù hợp, và trả lời được câu hỏi khi thiết kế hệ thống: <strong>"Redis sập thì mất tối đa bao nhiêu dữ liệu?"</strong>
+</div>
+
+<h2>1. AOF: ghi lại mọi lệnh ghi</h2>
+<p>Thay vì chụp ảnh định kỳ như RDB, <strong>AOF</strong> (append-only file) <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/">ghi nối đuôi mọi lệnh ghi</a> mà server nhận được. Khi khởi động lại, Redis chạy lại toàn bộ log để dựng lại dữ liệu.</p>
+<p>Điểm mấu chốt là khi nào dữ liệu thật sự xuống đĩa. Ghi vào file chỉ là ghi vào bộ đệm của kernel; phải <code>fsync</code> thì mới chắc chắn nằm trên đĩa:</p>
+<div class="table-wrap"><table>
+<tr><th><code>appendfsync</code></th><th>fsync khi nào</th><th>Mất tối đa khi sập</th><th>Hiệu năng</th></tr>
+<tr><td><code>always</code></td><td>Sau mỗi lệnh ghi</td><td>Gần như không mất</td><td>Chậm nhất</td></tr>
+<tr><td><code>everysec</code> <em>(mặc định)</em></td><td>Mỗi giây một lần</td><td>~1 giây dữ liệu</td><td>Gần bằng không có AOF</td></tr>
+<tr><td><code>no</code></td><td>Để hệ điều hành tự quyết</td><td>Có thể nhiều giây</td><td>Nhanh nhất</td></tr>
+</table></div>
+
+<h3>Rewrite: chống phình file</h3>
+<p><code>INCR visits</code> chạy một triệu lần thì log có một triệu dòng, nhưng trạng thái cuối chỉ là một con số. <strong>AOF rewrite</strong> viết lại log thành dạng gọn nhất. Rewrite cũng dùng <code>fork()</code>, nên mang theo đúng những cái giá bạn đã học ở <a href="0007-rdb-va-fork.html">bài 7</a>. Từ Redis 7, AOF gồm nhiều file: một file <em>base</em> (dạng RDB), một file <em>incr</em> (các lệnh mới) và một <em>manifest</em> liệt kê chúng.</p>
+
+<h3>RDB hay AOF?</h3>
+<p>Có thể bật <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/">cả hai cùng lúc</a>. RDB gọn, khởi động nhanh, tiện backup. AOF mất ít dữ liệu hơn. Nếu Redis chỉ là cache có thể dựng lại từ database, thường không cần AOF.</p>
+
+<h2>2. Lab (~5 phút)</h2>
+<ol class="steps">
+<li>Bật AOF khi đang chạy rồi ghi vài lệnh:
+<pre><code>docker exec redis-lab redis-cli CONFIG GET appendfsync    <span class="c">everysec</span>
+docker exec redis-lab redis-cli CONFIG SET appendonly yes
+docker exec redis-lab redis-cli SET hello world
+docker exec redis-lab redis-cli INCR visits
+docker exec redis-lab redis-cli INCR visits
+docker exec redis-lab ls /data/appendonlydir
+<span class="c">appendonly.aof.1.base.rdb  appendonly.aof.1.incr.aof  appendonly.aof.manifest</span></code></pre></li>
+<li>Đọc file incr. Đây chính là giao thức RESP mà client gửi lên:
+<pre><code>docker exec redis-lab sh -c 'cat /data/appendonlydir/*.incr.aof'
+<span class="c">*3        ← mảng 3 phần tử
+$3        ← chuỗi dài 3 byte
+SET
+$5
+hello
+$5
+world
+*2
+$4
+INCR
+$6
+visits
+…</span></code></pre>
+Hai lệnh <code>INCR</code> được lưu thành hai mục riêng: log ghi lại <em>lệnh</em>, không ghi lại trạng thái.</li>
+<li>Rewrite rồi xem manifest:
+<pre><code>docker exec redis-lab redis-cli BGREWRITEAOF
+docker exec redis-lab cat /data/appendonlydir/appendonly.aof.manifest
+<span class="c">file appendonly.aof.2.base.rdb seq 2 type b
+file appendonly.aof.2.incr.aof seq 2 type i</span></code></pre>
+Dữ liệu cũ được gộp vào base mới (seq 2), file incr bắt đầu lại từ đầu.</li>
+</ol>
+
+<h2>3. ElastiCache: độ bền đến từ replica, không phải đĩa</h2>
+<p>Trên một node đơn, AOF nằm trên đĩa của chính node đó, tức là trong một AZ duy nhất. AWS chỉ ra <a href="https://aws.amazon.com/memorydb/faqs/">rủi ro mất dữ liệu</a> khi AOF chỉ nằm cục bộ trên primary. Cách AWS khuyến nghị cho Redis OSS/Valkey là <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/disaster-recovery-resiliency.html">bật Multi-AZ với replica</a>: primary chết thì replica ở AZ khác được promote lên.</p>
+<p><strong>Cái bẫy:</strong> replication là <em>bất đồng bộ</em>. Những lệnh ghi primary đã trả <code>OK</code> nhưng chưa kịp sang replica sẽ <strong>mất</strong> khi failover. Nếu cần độ bền cao hơn, có các lựa chọn riêng: tính năng durability của ElastiCache, với <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Durability.Limitations.html">yêu cầu Valkey 9.0+, Multi-AZ và cluster mode</a>, hoặc dịch vụ MemoryDB. Hãy kiểm tra docs hiện hành trước khi quyết định.</p>
+<div class="box">
+  <span class="label">Quy tắc thiết kế</span>
+  Mặc định coi Redis là <strong>cache</strong>: mất dữ liệu thì dựng lại từ nguồn chính (database). Chỉ dùng Redis làm nơi lưu dữ liệu chính khi bạn đã trả lời được rõ ràng câu hỏi "failover thì mất tối đa bao nhiêu?".
+</div>
+
+<h2>4. Tự kiểm tra</h2>
+<p class="quiz-score">Điểm: 0/5</p>
+
+<div class="quiz" data-correct="2">
+  <p class="q">AOF bật với <code>appendfsync everysec</code>. Máy mất điện đột ngột. Mất tối đa khoảng bao nhiêu dữ liệu?</p>
+  <button>Không mất gì vì AOF ghi mọi lệnh</button>
+  <button>Mọi thay đổi kể từ lần BGSAVE cuối</button>
+  <button>Khoảng một giây lệnh ghi gần nhất</button>
+  <p class="explain">Lệnh đã ghi vào bộ đệm nhưng chưa fsync sẽ mất. Với everysec, khoảng đó là ~1 giây.</p>
+</div>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Vì sao cần AOF rewrite?</p>
+  <button>Để mã hoá file AOF trước khi backup</button>
+  <button>Để log không phình mãi bởi lệnh cũ</button>
+  <button>Để chuyển AOF sang replica nhanh hơn</button>
+  <p class="explain">Log ghi lại từng lệnh, kể cả những lệnh đã bị ghi đè. Rewrite gộp lại thành trạng thái hiện tại (file base) cộng với phần mới (file incr).</p>
+</div>
+
+<div class="quiz" data-correct="0">
+  <p class="q">ElastiCache Redis OSS có Multi-AZ. Primary chết, replica được promote. Dữ liệu nào có thể mất?</p>
+  <button>Lệnh ghi đã OK nhưng chưa kịp sang replica</button>
+  <button>Không mất gì vì replication là đồng bộ</button>
+  <button>Toàn bộ dữ liệu từ lần backup gần nhất</button>
+  <p class="explain">Replication bất đồng bộ: primary trả OK trước rồi mới gửi sang replica. Phần còn trên đường truyền sẽ mất khi failover.</p>
+</div>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Redis chỉ làm cache, dữ liệu dựng lại được từ PostgreSQL. Cấu hình persistence nào hợp lý?</p>
+  <button><code>appendfsync always</code> cho an toàn tuyệt đối</button>
+  <button>Không cần AOF; RDB hoặc tắt hẳn đều được</button>
+  <button>Bật AOF và RDB, fsync sau mỗi lệnh ghi</button>
+  <p class="explain">Mất cache chỉ làm tăng tải database tạm thời. AOF <code>always</code> trả giá hiệu năng cho thứ bạn không cần.</p>
+</div>
+
+<div class="quiz" data-correct="2">
+  <p class="q"><em>Ôn bài 7 + bài 1:</em> Cái gì <em>chặn luồng chính</em> khi Redis snapshot hoặc AOF rewrite?</p>
+  <button>Toàn bộ quá trình ghi file xuống đĩa</button>
+  <button>Việc nén dữ liệu trong process con</button>
+  <button>Chỉ bước gọi fork() ở process cha</button>
+  <p class="explain">Process con mới là nơi ghi file. Riêng lời gọi <code>fork()</code> (sao chép page table) chạy trên luồng chính, đo bằng <code>latest_fork_usec</code>.</p>
+</div>
+
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/">Redis persistence, redis.io</a>. Đọc mục <em>"Append-only file"</em>, <em>"How durable is the append only file?"</em> và <em>"Log rewriting"</em>.</p>
+<div class="box"><span class="label">Hỏi thầy</span>Hỏi agent nếu còn thắc mắc, ví dụ: <em>"lệnh <code>WAIT</code> có làm replication thành đồng bộ không?"</em> hoặc <em>"khi nào nên chọn MemoryDB thay ElastiCache?"</em></div>
+
+<footer>← <a href="0007-rdb-va-fork.html">Bài 7</a> · Bài tiếp: <em>(phần Pattern, soạn sau khi bạn báo kết quả)</em><br>Tham khảo: <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></footer>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

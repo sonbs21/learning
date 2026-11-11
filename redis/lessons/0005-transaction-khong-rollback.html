@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transaction không rollback</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Redis · Bài 5 · <a href="0004-key-het-han-the-nao.html">← Bài 4</a> · <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></nav>
+
+<h1>Transaction không có rollback</h1>
+<p class="subtitle">Ở bài 2 bạn đã biết pipeline không nguyên tử. Giờ là các công cụ cho tính nguyên tử: MULTI/EXEC, WATCH và Lua. Mỗi công cụ có một cái bẫy riêng. ~18 phút.</p>
+
+<div class="box goal">
+  <span class="label">Sau bài này bạn sẽ</span>
+  Tự tay thấy một transaction "thành công một nửa", dùng <code>WATCH</code> để chặn lost update, và hiểu vì sao một script Lua viết dở có thể làm treo cả Redis.
+</div>
+
+<h2>1. MULTI/EXEC: xếp hàng rồi chạy liền một mạch</h2>
+<p>Sau <code>MULTI</code>, các lệnh chưa chạy mà chỉ được <em>xếp hàng</em> (Redis trả về <code>QUEUED</code>). Tới <code>EXEC</code>, cả khối chạy liền một mạch trên luồng chính, và <strong>không lệnh nào của client khác chen vào giữa được</strong>. Đó là phần "nguyên tử" của transaction.</p>
+<p>Nhưng có một điểm khác hẳn transaction của database SQL: <a href="https://redis.io/docs/latest/develop/using-commands/transactions/">Redis không hỗ trợ rollback</a>. Nếu một lệnh lỗi khi đang chạy, các lệnh còn lại <em>vẫn chạy</em>.</p>
+
+<div class="table-wrap"><table>
+<tr><th>Lỗi xảy ra khi</th><th>Ví dụ</th><th>Kết quả</th></tr>
+<tr><td>Xếp hàng (trước EXEC)</td><td>Sai tên lệnh, sai số tham số</td><td><code>EXECABORT</code>: cả transaction bị huỷ, không lệnh nào chạy</td></tr>
+<tr><td>Thực thi (trong EXEC)</td><td><code>INCR</code> lên một chuỗi không phải số</td><td>Lệnh đó báo lỗi, <strong>các lệnh khác vẫn được ghi</strong></td></tr>
+</table></div>
+
+<h2>2. WATCH: khoá lạc quan</h2>
+<p>Bài toán: đọc số dư, tính toán trong app, rồi ghi lại. Nếu giữa lúc đọc và lúc ghi có client khác sửa số dư, bản ghi của bạn sẽ đè mất thay đổi của họ (<em>lost update</em>). <code>WATCH key</code> giải quyết việc này: nếu key bị sửa trước <code>EXEC</code>, thì <code>EXEC</code> trả về <code>nil</code> và không ghi gì cả. App phải tự thử lại.</p>
+
+<h2>3. Lua: nguyên tử thật sự, và nguy hiểm thật sự</h2>
+<p>Script Lua (<code>EVAL</code>) chạy trọn vẹn trên server như một lệnh duy nhất. Script có thể đọc dữ liệu, rẽ nhánh rồi ghi, tất cả nguyên tử. Đây là cách viết các thao tác như "trừ tồn kho nếu còn hàng" hay rate limiter.</p>
+<p>Cái giá: trong lúc script chạy, <strong>luồng chính bị chiếm hoàn toàn</strong> (đúng mô hình ở <a href="0001-mot-luong-xu-ly-tat-ca.html">bài 1</a>). Script chạy quá <code>busy-reply-threshold</code> (mặc định 5000 ms) thì Redis bắt đầu trả lỗi <code>BUSY</code> cho mọi client khác. AWS cũng khuyên <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/WorkingWithRedis.html">giữ script Lua ngắn và khai báo trước mọi key script dùng</a>, để ở cluster mode các key đó nằm cùng một hash slot.</p>
+
+<h2>4. Lab (~8 phút)</h2>
+<ol class="steps">
+<li><strong>Transaction thành công một nửa:</strong>
+<pre><code>docker exec -it redis-lab redis-cli
+SET s hello
+MULTI
+SET a 1          <span class="c">QUEUED</span>
+INCR s           <span class="c">QUEUED   ← sẽ lỗi khi chạy</span>
+SET b 2          <span class="c">QUEUED</span>
+EXEC
+<span class="c">1) OK
+2) (error) ERR value is not an integer or out of range
+3) OK</span>
+MGET a b         <span class="c">1) "1"  2) "2"   ← a và b vẫn được ghi</span></code></pre></li>
+<li><strong>Lỗi lúc xếp hàng thì huỷ cả khối:</strong>
+<pre><code>MULTI
+SET c 1
+NOTACOMMAND      <span class="c">(error) ERR unknown command …</span>
+EXEC             <span class="c">(error) EXECABORT Transaction discarded because of previous errors.</span>
+GET c            <span class="c">(nil)</span></code></pre></li>
+<li><strong>WATCH chặn lost update.</strong> Mở hai terminal redis-cli:
+<pre><code><span class="c"># Terminal 1</span>
+SET bal 100
+WATCH bal
+GET bal                    <span class="c">"100"</span>
+<span class="c"># Terminal 2</span>
+SET bal 500
+<span class="c"># Terminal 1</span>
+MULTI
+SET bal 90
+EXEC                       <span class="c">(nil)   ← bị huỷ vì bal đã đổi</span>
+GET bal                    <span class="c">"500"   ← thay đổi của terminal 2 được giữ nguyên</span></code></pre></li>
+<li><strong>Lua chiếm luồng chính.</strong> Terminal 1 chạy một script bận 7 giây:
+<pre><code>docker exec redis-lab redis-cli EVAL "local t=redis.call('TIME')[1]+0; while redis.call('TIME')[1]+0 &lt; t+7 do end return 1" 0</code></pre>
+Sau hơn 5 giây, ở terminal 2:
+<pre><code>docker exec redis-lab redis-cli GET bal
+<span class="c">(error) BUSY Redis is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSAVE.</span>
+docker exec redis-lab redis-cli SCRIPT KILL   <span class="c">OK</span></code></pre>
+<code>SCRIPT KILL</code> chỉ dừng được script <em>chưa ghi</em> dữ liệu. Script đã ghi rồi thì chỉ còn cách <code>SHUTDOWN NOSAVE</code>, tức là tắt server.</li>
+</ol>
+
+<h2>5. Tự kiểm tra</h2>
+<p class="quiz-score">Điểm: 0/5</p>
+
+<div class="quiz" data-correct="2">
+  <p class="q">Trong <code>EXEC</code>, lệnh thứ 2 trên 3 bị lỗi kiểu dữ liệu. Lệnh 1 và lệnh 3 thì sao?</p>
+  <button>Cả hai bị rollback như transaction SQL</button>
+  <button>Lệnh 1 giữ, lệnh 3 không bao giờ chạy</button>
+  <button>Cả hai vẫn được ghi, chỉ lệnh 2 lỗi</button>
+  <p class="explain">Redis không rollback. Lỗi lúc thực thi chỉ ảnh hưởng đúng lệnh đó, các lệnh khác trong khối vẫn chạy.</p>
+</div>
+
+<div class="quiz" data-correct="0">
+  <p class="q">Sau <code>WATCH stock</code>, client khác sửa <code>stock</code> trước khi bạn gọi <code>EXEC</code>. Điều gì xảy ra?</p>
+  <button>EXEC trả về nil, không lệnh nào được ghi</button>
+  <button>EXEC chờ client kia xong rồi mới chạy</button>
+  <button>EXEC ghi đè lên thay đổi của client kia</button>
+  <p class="explain">WATCH là khoá lạc quan: không chặn ai, chỉ huỷ EXEC nếu key đã đổi. App phải tự thử lại.</p>
+</div>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Script Lua chạy 8 giây trên production. Các client khác gặp gì?</p>
+  <button>Chạy bình thường vì Lua có luồng riêng</button>
+  <button>Bị chặn, sau ~5 giây nhận lỗi BUSY</button>
+  <button>Tự động được chuyển sang node replica</button>
+  <p class="explain">Lua chạy trên luồng chính. Quá <code>busy-reply-threshold</code> (5000 ms), Redis trả <code>BUSY</code> cho mọi lệnh khác ngoài SCRIPT KILL/SHUTDOWN NOSAVE.</p>
+</div>
+
+<div class="quiz" data-correct="0">
+  <p class="q">Cần "trừ tồn kho chỉ khi còn hàng" một cách nguyên tử, nhanh, ít đi về. Chọn gì?</p>
+  <button>Script Lua ngắn chạy trên server</button>
+  <button>Pipeline gồm lệnh GET rồi DECRBY</button>
+  <button>MULTI gồm lệnh GET rồi DECRBY</button>
+  <p class="explain">Pipeline không nguyên tử. Trong MULTI, GET chỉ trả về QUEUED nên không rẽ nhánh theo giá trị được. Lua đọc, kiểm tra, rồi ghi trong một bước.</p>
+</div>
+
+<div class="quiz" data-correct="2">
+  <p class="q"><em>Ôn bài 4:</em> Key cache có TTL, sau khi cập nhật thì <code>TTL</code> trả về <code>-1</code>. Nguyên nhân có khả năng nhất?</p>
+  <button>Key đã bị cơ chế active xoá mất rồi</button>
+  <button>Replica chưa nhận được lệnh DEL gửi tới</button>
+  <button>Code đã ghi đè bằng SET không kèm TTL</button>
+  <p class="explain"><code>-1</code> nghĩa là key tồn tại nhưng không có hạn (bị xoá thì phải là <code>-2</code>). Lệnh ghi đè như <code>SET</code> xoá TTL.</p>
+</div>
+
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://redis.io/docs/latest/develop/using-commands/transactions/">Transactions, redis.io</a>. Đọc mục <em>"Errors inside a transaction"</em>, <em>"What about rollbacks?"</em> và <em>"Optimistic locking using check-and-set"</em>.</p>
+<div class="box"><span class="label">Hỏi thầy</span>Hỏi agent nếu còn thắc mắc, ví dụ: <em>"Spring <code>RedisTemplate</code> chạy MULTI/EXEC thế nào, có cần <code>SessionCallback</code> không?"</em> hoặc <em>"distributed lock bằng Redis có an toàn không?"</em></div>
+
+<footer>← <a href="0004-key-het-han-the-nao.html">Bài 4</a> · Bài tiếp: <a href="0006-khi-ram-day.html">Bài 6: Khi RAM đầy</a> →<br>Tham khảo: <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></footer>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

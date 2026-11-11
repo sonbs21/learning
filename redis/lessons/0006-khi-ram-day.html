@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Khi RAM đầy</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Redis · Bài 6 · <a href="0005-transaction-khong-rollback.html">← Bài 5</a> · <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></nav>
+
+<h1>Khi RAM đầy</h1>
+<p class="subtitle"><code>maxmemory</code> và eviction policy quyết định Redis sẽ xoá bớt key hay từ chối ghi. Chọn sai là app bắt đầu nhận lỗi OOM. ~15 phút.</p>
+
+<div class="box goal">
+  <span class="label">Sau bài này bạn sẽ</span>
+  Tái hiện lỗi <code>OOM command not allowed</code>, hiểu vì sao policy mặc định của ElastiCache (<code>volatile-lru</code>) vẫn có thể ném lỗi OOM, và chọn đúng policy cho một cache.
+</div>
+
+<h2>1. maxmemory: trần bộ nhớ</h2>
+<p><code>maxmemory</code> là giới hạn RAM dành cho dữ liệu. Chạm trần thì Redis làm theo <code>maxmemory-policy</code>. Redis tự host mặc định là <code>maxmemory 0</code> (không giới hạn) và <code>noeviction</code>; bạn sẽ kiểm tra lại trong lab.</p>
+
+<div class="table-wrap"><table>
+<tr><th>Policy</th><th>Xoá key nào khi đầy</th><th>Hợp với</th></tr>
+<tr><td><code>noeviction</code></td><td>Không xoá; lệnh ghi bị từ chối, lệnh đọc vẫn chạy</td><td>Dữ liệu không được mất (queue, store chính)</td></tr>
+<tr><td><code>allkeys-lru</code></td><td>Key lâu nhất không được dùng, xét trên <em>mọi</em> key</td><td>Cache thuần</td></tr>
+<tr><td><code>allkeys-lfu</code></td><td>Key ít được dùng nhất, xét trên mọi key</td><td>Cache có tập key "nóng" ổn định</td></tr>
+<tr><td><code>volatile-lru</code> / <code>-lfu</code> / <code>-ttl</code> / <code>-random</code></td><td>Chỉ xét các key <em>có TTL</em></td><td>Trộn cache (có TTL) với dữ liệu cần giữ (không TTL)</td></tr>
+<tr><td><code>allkeys-random</code></td><td>Ngẫu nhiên trên mọi key</td><td>Hiếm khi dùng</td></tr>
+</table></div>
+<p>Hai chi tiết quan trọng từ <a href="https://redis.io/docs/latest/develop/reference/eviction/">tài liệu eviction</a>:</p>
+<ul>
+<li><strong>LRU chỉ là xấp xỉ.</strong> Redis không theo dõi chính xác thứ tự truy cập của mọi key. Nó lấy ngẫu nhiên <code>maxmemory-samples</code> key (mặc định 5) và xoá key "già" nhất trong mẫu đó.</li>
+<li><strong>Các policy <code>volatile-*</code> hoạt động như <code>noeviction</code> khi không có key nào có TTL.</strong> Đây chính là bẫy.</li>
+</ul>
+
+<h2>2. Lab (~6 phút)</h2>
+<ol class="steps">
+<li>Xem cấu hình mặc định, rồi đặt trần thật nhỏ:
+<pre><code>docker exec -it redis-lab redis-cli
+CONFIG GET maxmemory            <span class="c">0</span>
+CONFIG GET maxmemory-policy     <span class="c">noeviction</span>
+CONFIG GET maxmemory-samples    <span class="c">5</span>
+FLUSHALL
+CONFIG SET maxmemory 2mb</code></pre></li>
+<li>Thoát ra shell, nạp 100 000 key <strong>không có TTL</strong>:
+<pre><code>docker exec redis-lab redis-cli EVAL "for i=1,100000 do redis.call('SET','k:'..i,string.rep('x',100)) end" 0</code></pre>
+<p class="note">Bạn sẽ thấy script này nạp được cả 100 000 key, vượt xa 2 MB. Lý do: Redis chỉ kiểm tra bộ nhớ lúc script <em>bắt đầu</em>, rồi để script chạy trọn vẹn cho đảm bảo nguyên tử. Hiện tượng phụ, nhưng đáng biết.</p></li>
+<li>Giờ RAM đã vượt trần. Thử từng policy:
+<pre><code>SET one more                         <span class="c">(error) OOM command not allowed when used memory &gt; 'maxmemory'.</span>
+CONFIG SET maxmemory-policy volatile-lru
+SET two more                         <span class="c">(error) OOM …   ← không key nào có TTL nên không có gì để xoá</span>
+CONFIG SET maxmemory-policy allkeys-lru
+SET three more                       <span class="c">OK</span>
+INFO stats                           <span class="c">evicted_keys:84544   ← xoá hàng loạt trong một lần ghi</span>
+DBSIZE                               <span class="c">~1094</span>
+CONFIG SET maxmemory 0</code></pre></li>
+</ol>
+<p>Chú ý dòng <code>evicted_keys:84544</code>: việc xoá key được thực hiện <em>ngay trong lệnh ghi</em>, trên luồng chính. Khi RAM vượt trần xa (ví dụ ai đó hạ <code>maxmemory</code> đột ngột), một lệnh <code>SET</code> có thể phải xoá hàng chục nghìn key trước khi trả về.</p>
+
+<h2>3. ElastiCache: bẫy volatile-lru</h2>
+<p>Theo AWS, policy mặc định trong parameter group của ElastiCache là <a href="https://repost.aws/knowledge-center/oom-command-not-allowed-redis"><code>volatile-lru</code></a>. Nếu code lưu key không kèm TTL (lỗi mất TTL ở <a href="0004-key-het-han-the-nao.html">bài 4</a>!), thì khi RAM đầy, Redis không có key nào để xoá và app sẽ nhận lỗi OOM. Có hai cách xử lý:</p>
+<ul>
+<li>Đảm bảo mọi key cache đều có TTL, hoặc</li>
+<li>Nếu cluster chỉ dùng làm cache, tạo <em>custom parameter group</em> với <code>allkeys-lru</code>. AWS không cho sửa parameter group mặc định (<a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/redis-memory-management.html">docs</a>).</li>
+</ul>
+<p>Theo dõi bằng metric <code>Evictions</code> và mức dùng bộ nhớ trên CloudWatch (<a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/CacheMetrics.WhichShouldIMonitor.html">metric nên theo dõi</a>). Evictions tăng đều đặn nghĩa là cache quá nhỏ so với tập dữ liệu "nóng".</p>
+
+<h2>4. Tự kiểm tra</h2>
+<p class="quiz-score">Điểm: 0/5</p>
+
+<div class="quiz" data-correct="1">
+  <p class="q">ElastiCache dùng <code>volatile-lru</code>, RAM đầy, app nhận lỗi OOM khi ghi. Nguyên nhân có khả năng nhất?</p>
+  <button>LRU của Redis chỉ là xấp xỉ, không chính xác</button>
+  <button>Hầu hết key không có TTL nên không xoá được</button>
+  <button><code>maxmemory-samples</code> đang để quá thấp</button>
+  <p class="explain">Các policy <code>volatile-*</code> chỉ xoá key có TTL. Không có key nào có TTL thì chúng hoạt động như <code>noeviction</code>.</p>
+</div>
+
+<div class="quiz" data-correct="2">
+  <p class="q">Redis dùng làm hàng đợi job, mất job là không chấp nhận được. Chọn policy nào?</p>
+  <button><code>allkeys-lru</code> để luôn còn chỗ ghi</button>
+  <button><code>allkeys-random</code> để chia đều thiệt hại</button>
+  <button><code>noeviction</code> và cảnh báo khi gần đầy</button>
+  <p class="explain">Eviction là im lặng xoá dữ liệu. Với dữ liệu không được mất, thà báo lỗi ghi (rồi cảnh báo và scale) còn hơn mất job mà không ai biết.</p>
+</div>
+
+<div class="quiz" data-correct="0">
+  <p class="q">Redis chọn key để xoá theo <code>allkeys-lru</code> như thế nào?</p>
+  <button>Lấy mẫu vài key, xoá key cũ nhất trong mẫu</button>
+  <button>Duyệt toàn bộ key, xoá key cũ nhất tuyệt đối</button>
+  <button>Xoá theo thứ tự key được tạo ra sớm nhất</button>
+  <p class="explain">LRU xấp xỉ: lấy <code>maxmemory-samples</code> key (mặc định 5). Duyệt toàn bộ sẽ là thao tác O(N) chặn luồng chính.</p>
+</div>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Vì sao hạ <code>maxmemory</code> đột ngột trên production có thể gây spike latency?</p>
+  <button>Redis phải khởi động lại để áp dụng cấu hình</button>
+  <button>Lệnh ghi kế tiếp phải xoá rất nhiều key</button>
+  <button>Mọi key đang có TTL bị reset về giá trị gốc</button>
+  <p class="explain">Eviction chạy ngay trong lệnh ghi trên luồng chính. Lab cho thấy một lệnh SET đã xoá 84 544 key.</p>
+</div>
+
+<div class="quiz" data-correct="0">
+  <p class="q"><em>Ôn bài 5:</em> Transaction có 3 lệnh. Lệnh 2 sai tên lệnh (phát hiện ngay lúc xếp hàng). Khi gọi EXEC thì sao?</p>
+  <button>EXECABORT, không lệnh nào được thực thi</button>
+  <button>Lệnh 1 và lệnh 3 chạy, lệnh 2 báo lỗi</button>
+  <button>Lệnh 1 chạy, lệnh 2 và lệnh 3 bị bỏ qua</button>
+  <p class="explain">Lỗi lúc xếp hàng thì cả transaction bị huỷ. Chỉ lỗi lúc <em>thực thi</em> mới cho kết quả "thành công một nửa".</p>
+</div>
+
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://redis.io/docs/latest/develop/reference/eviction/">Key eviction, redis.io</a>. Đọc bảng policy và mục <em>"Approximated LRU algorithm"</em>.</p>
+<div class="box"><span class="label">Hỏi thầy</span>Hỏi agent nếu còn thắc mắc, ví dụ: <em>"LRU và LFU khác nhau thế nào trong thực tế?"</em> hoặc <em>"đặt maxmemory bao nhiêu so với RAM của máy?"</em> (gợi ý: bài 7 sẽ trả lời).</div>
+
+<footer>← <a href="0005-transaction-khong-rollback.html">Bài 5</a> · Bài tiếp: <a href="0007-rdb-va-fork.html">Bài 7: RDB và cái giá của fork</a> →<br>Tham khảo: <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></footer>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

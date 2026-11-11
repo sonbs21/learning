@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IoC DI Bean</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>IoC, DI &amp; Bean</h1>
+<p class="subtitle">Cheat sheet · từ <a href="../lessons/0001-vi-sao-can-spring.html">Bài 1</a></p>
+
+<h2>Thuật ngữ</h2>
+<table>
+  <tr><th>Từ</th><th>Nghĩa</th></tr>
+  <tr><td>Dependency</td><td>Object mà một class cần dùng để làm việc (<code>OrderService</code> cần <code>EmailSender</code>).</td></tr>
+  <tr><td>DI (Dependency Injection)</td><td>Đưa dependency vào cho object, thường là qua constructor, thay vì để object tự <code>new</code>.</td></tr>
+  <tr><td>IoC (Inversion of Control)</td><td>Quyền tạo và lắp ráp object chuyển từ class sang container. DI là một dạng của IoC.</td></tr>
+  <tr><td>Container / <code>ApplicationContext</code></td><td>Object của Spring chuyên tạo, lắp ráp và giữ các bean.</td></tr>
+  <tr><td>Bean</td><td>Object do container tạo, lắp ráp và quản lý.</td></tr>
+  <tr><td><code>@Component</code></td><td>Đánh dấu "Spring hãy tạo bean từ class này".</td></tr>
+</table>
+
+<h2>Mẫu code chuẩn</h2>
+<pre><code>@Component
+public class OrderService {
+    private final EmailSender emailSender;          // phụ thuộc vào interface
+
+    public OrderService(EmailSender emailSender) {  // constructor injection
+        this.emailSender = emailSender;              // chỉ 1 constructor ⇒ không cần @Autowired
+    }
+}
+
+// Xin bean từ container
+ApplicationContext context = SpringApplication.run(App.class, args);
+OrderService s = context.getBean(OrderService.class);</code></pre>
+
+<h2>Hai lỗi phải nhận ra ngay</h2>
+<table>
+  <tr><th>Thông báo</th><th>Nghĩa</th><th>Kiểm tra</th></tr>
+  <tr><td><code>required a bean of type 'X' that could not be found</code></td><td>Không có bean nào kiểu X</td><td>Class đã có <code>@Component</code> chưa? Có nằm trong package của class main (hoặc package con) không?</td></tr>
+  <tr><td><code>required a single bean, but 2 were found</code></td><td>Nhiều bean cùng khớp</td><td>Chọn một bằng <code>@Primary</code> hoặc <code>@Qualifier</code> (bài 2)</td></tr>
+</table>
+
+<h2>Chọn bean khi có nhiều ứng viên <span class="cite"><a href="../lessons/0002-chon-bean-primary-qualifier.html">Bài 2</a></span></h2>
+<table>
+  <tr><th>Cách</th><th>Đặt ở</th><th>Nghĩa</th></tr>
+  <tr><td><code>@Primary</code></td><td>Class được chọn</td><td>Mặc định khi không ai yêu cầu gì cụ thể</td></tr>
+  <tr><td><code>@Qualifier("smsSender")</code></td><td>Chỗ nhận (tham số)</td><td>Chỉ đích danh, <strong>thắng</strong> <code>@Primary</code></td></tr>
+  <tr><td><code>List&lt;EmailSender&gt;</code></td><td>Kiểu tham số</td><td>Nhận tất cả bean thuộc kiểu đó</td></tr>
+</table>
+
+<h2>@Component hay @Bean <span class="cite"><a href="../lessons/0003-configuration-va-bean.html">Bài 3</a></span></h2>
+<pre><code>@Configuration
+public class AppConfig {
+    @Bean                                   // tên bean = tên method: "clock"
+    public Clock clock() { return Clock.systemDefaultZone(); }
+}</code></pre>
+<ul>
+  <li><code>@Component</code> (cùng <code>@Service</code>, <code>@Repository</code>, <code>@Controller</code>): dùng cho class do bạn viết.</li>
+  <li><code>@Bean</code>: dùng cho class của thư viện, hoặc khi cách tạo object cần logic.</li>
+</ul>
+
+<h2>Scope &amp; vòng đời <span class="cite"><a href="../lessons/0004-scope-va-vong-doi-bean.html">Bài 4</a></span></h2>
+<table>
+  <tr><th>Scope</th><th>Số object</th><th><code>@PreDestroy</code></th></tr>
+  <tr><td><code>singleton</code> (mặc định)</td><td>1, tạo lúc app khởi động, mọi nơi dùng chung</td><td>Có, gọi khi container đóng</td></tr>
+  <tr><td><code>@Scope("prototype")</code></td><td>Mỗi lần xin bean là một object mới</td><td><strong>Không</strong> được gọi</td></tr>
+</table>
+<p>Thứ tự: constructor → <code>@PostConstruct</code> → dùng → <code>@PreDestroy</code>. Không lưu dữ liệu riêng của từng người dùng vào field của bean singleton.</p>
+
+<h2>Ghi nhớ</h2>
+<ul>
+  <li>Tên bean mặc định là tên class với chữ cái đầu viết thường: <code>ConsoleEmailSender</code> → <code>consoleEmailSender</code>.</li>
+  <li>Spring quét package chứa class <code>@SpringBootApplication</code> và các package con.</li>
+  <li>"JavaBean" (class có getter/setter) <strong>không</strong> phải là "Spring bean".</li>
+</ul>
+
+<p>Nguồn: <a href="https://docs.spring.io/spring-framework/reference/core/beans/introduction.html">Spring Framework Reference: IoC Container</a></p>
+</body>
+</html>

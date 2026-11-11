@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auto-configuration không phải phép màu</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Auto-configuration không phải phép màu</h1>
+<p class="subtitle">Bài 1 · Bắt Spring Boot tự khai ra vì sao nó tạo (hoặc không tạo) một bean</p>
+<div class="meta"><span>~40 phút</span><span>Lab: <code>./lab</code></span><span>Spring Boot 3.5.16</span></div>
+
+<p>Câu hỏi số 4 trong <code>../boot/phong-van.md</code>: <em>"Spring Boot Auto-Configuration hoạt động như thế nào?"</em>. Hầu hết ứng viên trả lời "Boot tự cấu hình dựa trên dependency". Câu đó không sai, nhưng nó chưa giải thích được gì. Sau bài này bạn sẽ trả lời được kèm <strong>bằng chứng</strong> lấy từ chính máy mình. Trong công việc, đây cũng là kỹ năng đầu tiên cần dùng khi gặp lỗi kiểu "sao bean này không có / sao cấu hình của tôi không ăn".</p>
+
+<h2>Ý tưởng cốt lõi</h2>
+
+<p class="big-idea">Auto-configuration chỉ là các class <code>@Configuration</code> bình thường. Mỗi class được gắn thêm điều kiện <code>@Conditional…</code>, và Spring xét chúng <em>sau</em> các bean do bạn tự khai báo.</p>
+
+<p>Khi bạn chạy <code>SpringApplication.run(...)</code>, chuyện xảy ra theo thứ tự sau:</p>
+
+<ol class="flow">
+  <li><code>@SpringBootApplication</code> thực chất là ba annotation gộp lại: <code>@Configuration</code> + <code>@EnableAutoConfiguration</code> + <code>@ComponentScan</code>. <a class="cite" href="https://docs.spring.io/spring-boot/reference/using/using-the-springbootapplication-annotation.html">[docs]</a></li>
+  <li><code>@ComponentScan</code> tìm <strong>bean của bạn</strong> trong package của class main và các package con.</li>
+  <li><code>@EnableAutoConfiguration</code> đọc file <code>META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports</code> trong từng jar trên classpath. Mỗi dòng của file là một class auto-config <strong>ứng viên</strong>. <a class="cite" href="https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html#features.developing-auto-configuration.locating-auto-configuration-candidates">[docs]</a></li>
+  <li>Với mỗi ứng viên, Spring kiểm tra các điều kiện, thường gặp nhất là hai cái:
+    <br><code>@ConditionalOnClass</code>: class X có trên classpath không? (tức là bạn có thêm dependency đó chưa)
+    <br><code>@ConditionalOnMissingBean</code>: bạn đã tự khai báo bean kiểu này chưa? <a class="cite" href="https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html#features.developing-auto-configuration.understanding-auto-configured-beans">[docs]</a></li>
+  <li>Điều kiện đạt thì bean được tạo, không đạt thì bỏ qua. Mọi quyết định đều được ghi lại trong <strong>Conditions Evaluation Report</strong>, và cờ <code>--debug</code> sẽ in report đó ra. <a class="cite" href="https://docs.spring.io/spring-boot/reference/using/auto-configuration.html">[docs]</a></li>
+</ol>
+
+<div class="callout">
+  <strong>Vì sao "bean của bạn luôn thắng"?</strong>
+  Theo docs, auto-configuration được đảm bảo nạp <em>sau</em> các bean definition do người dùng khai báo. Nhờ vậy, khi <code>@ConditionalOnMissingBean</code> được xét, nó đã thấy hết bean của bạn. Cũng vì lý do này mà docs khuyên chỉ dùng <code>@ConditionalOnBean</code>/<code>@ConditionalOnMissingBean</code> trong class auto-configuration: đặt ở <code>@Configuration</code> của bạn thì thứ tự nạp không được đảm bảo. <a class="cite" href="https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html#features.developing-auto-configuration.condition-annotations.bean-conditions">[docs]</a>
+</div>
+
+<hr>
+
+<h2>Thí nghiệm: bắt Boot tự khai</h2>
+
+<div class="lab">
+<h3>Lab 1 · ~20 phút</h3>
+<ol>
+  <li><strong>Đếm số ứng viên.</strong> Boot có sẵn bao nhiêu auto-config?
+<pre><code>unzip -p ~/.m2/repository/org/springframework/boot/spring-boot-autoconfigure/3.5.16/spring-boot-autoconfigure-3.5.16.jar \
+  META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports | wc -l</code></pre>
+  Ghi lại con số. Sau đó thay <code>wc -l</code> bằng <code>grep Jackson</code> và tìm tên class lo việc tạo <code>ObjectMapper</code>.</li>
+
+  <li><strong>Chạy app với <code>--debug</code></strong> (project <code>./lab</code> đã có sẵn, chỉ gồm <code>starter-web</code>):
+<pre><code>cd lab
+mvn -o -q spring-boot:run \
+  -Dspring-boot.run.arguments="--debug --spring.main.web-application-type=none" > run.log
+grep -n "CONDITIONS EVALUATION REPORT" run.log</code></pre></li>
+
+  <li><strong>Tìm một positive match.</strong> Trong <code>run.log</code>, tìm <code>jacksonObjectMapper</code>. Đọc dòng ngay bên dưới nó: điều kiện nào đã đạt, và vì sao?</li>
+
+  <li><strong>Tìm một negative match.</strong> Tìm <code>DataSourceAutoConfiguration:</code>. Vì sao Boot <em>không</em> tạo DataSource? Nó đang thiếu class nào?</li>
+
+  <li><strong>Bắt Boot lùi lại (back off).</strong> Tạo file <code>lab/src/main/java/dev/lab/MapperConfig.java</code> và tự khai báo một bean <code>ObjectMapper</code>:
+<pre><code>package dev.lab;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+class MapperConfig {
+
+    @Bean
+    ObjectMapper myMapper() {
+        return new ObjectMapper();
+    }
+}</code></pre>
+  Chạy lại bước 2. Bây giờ <code>jacksonObjectMapper</code> nằm ở mục nào của report? Message của nó nhắc đến tên bean nào?</li>
+</ol>
+
+<details>
+  <summary>Đối chiếu kết quả (chỉ mở sau khi đã tự làm)</summary>
+<pre><code># Bước 1: 156 dòng; class cần tìm là JacksonAutoConfiguration
+
+# Bước 3 (Positive matches)
+JacksonAutoConfiguration.JacksonObjectMapperConfiguration#jacksonObjectMapper matched:
+   - @ConditionalOnMissingBean (types: com.fasterxml.jackson.databind.ObjectMapper; ...)
+     <span class="hl">did not find any beans</span> (OnBeanCondition)
+
+# Bước 4 (Negative matches)
+DataSourceAutoConfiguration:
+   Did not match:
+   - @ConditionalOnClass <span class="bad-hl">did not find required class</span>
+     'org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType'
+
+# Bước 5 (đã chuyển sang Negative matches)
+JacksonAutoConfiguration.JacksonObjectMapperConfiguration#jacksonObjectMapper:
+   Did not match:
+   - @ConditionalOnMissingBean ... <span class="hl">found beans of type</span> '...ObjectMapper' <span class="hl">myMapper</span></code></pre>
+  <p>Đây chính là câu trả lời phỏng vấn, kèm bằng chứng: <em>cùng một class auto-config, cùng một điều kiện, chỉ khác là bạn có khai báo bean hay không.</em></p>
+</details>
+</div>
+
+<p class="ask">Giữ lại <code>MapperConfig.java</code> hay xoá tuỳ bạn. Bài sau sẽ dùng lại project này.</p>
+
+<hr>
+
+<h2>Kiểm tra trí nhớ</h2>
+<p>Hãy làm quiz <strong>mà không kéo lên đọc lại</strong>. Việc phải cố nhớ ra chính là thứ giúp kiến thức ở lại lâu.</p>
+
+<div class="quiz" data-quiz="q1"></div>
+<script type="application/json" id="q1">
+[
+  {
+    "q": "Bạn tự khai báo một bean <code>ObjectMapper</code>. Điều gì xảy ra với <code>jacksonObjectMapper</code> của Boot?",
+    "options": [
+      "Boot bỏ qua bean của nó vì điều kiện không đạt",
+      "Boot ghi đè bean của bạn vì auto-config luôn chạy sau",
+      "Ứng dụng lỗi khởi động vì có hai bean cùng kiểu"
+    ],
+    "answer": 0,
+    "why": "<code>@ConditionalOnMissingBean</code> tìm thấy bean <code>myMapper</code> nên bean của Boot không được tạo. Đây là cơ chế back off."
+  },
+  {
+    "q": "Report ghi: <code>DataSourceAutoConfiguration: @ConditionalOnClass did not find required class ...EmbeddedDatabaseType</code>. Muốn Boot tạo DataSource thì làm gì?",
+    "options": [
+      "Thêm annotation @EnableDataSource vào class main của ứng dụng",
+      "Khai báo spring.datasource.url trong file application.properties là đủ thôi",
+      "Thêm dependency chứa class đó vào classpath, như spring-boot-starter-jdbc"
+    ],
+    "answer": 2,
+    "why": "Điều kiện bị trượt là <em>class</em>, nên chỉ property thì chưa đủ. Phải thêm jar chứa class đó (<code>spring-jdbc</code>, đi kèm <code>spring-boot-starter-jdbc</code>). Còn <code>@EnableDataSource</code> thì không tồn tại."
+  },
+  {
+    "q": "Spring Boot lấy danh sách auto-configuration <em>ứng viên</em> từ đâu?",
+    "options": [
+      "Quét mọi package con của class @SpringBootApplication",
+      "File AutoConfiguration.imports trong META-INF/spring của các jar",
+      "Đọc file application.yml trong thư mục resources"
+    ],
+    "answer": 1,
+    "why": "Mỗi jar khai báo auto-config của mình trong <code>META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports</code>. Component scan chỉ tìm bean <em>của bạn</em>."
+  },
+  {
+    "q": "Vì sao <code>@ConditionalOnMissingBean</code> đáng tin khi đặt trong auto-configuration, nhưng rủi ro khi đặt trong <code>@Configuration</code> của bạn?",
+    "options": [
+      "Annotation này chỉ hoạt động bên trong package của Spring",
+      "Config của bạn chạy song song, kết quả ngẫu nhiên",
+      "Auto-config luôn được nạp sau các bean bạn khai báo"
+    ],
+    "answer": 2,
+    "why": "Điều kiện về bean được xét theo những gì đã đăng ký <em>tại thời điểm đó</em>. Auto-config được đảm bảo chạy sau bean của bạn; giữa các config của bạn với nhau thì thứ tự không được đảm bảo."
+  },
+  {
+    "q": "<code>@SpringBootApplication</code> tương đương với tổ hợp nào?",
+    "options": [
+      "@Component, @EnableAutoConfiguration và @Import gộp lại",
+      "@Configuration, @EnableAutoConfiguration và @ComponentScan gộp lại",
+      "@Configuration, @EnableWebMvc và @ComponentScan gộp lại"
+    ],
+    "answer": 1,
+    "why": "Docs: tương đương <code>@SpringBootConfiguration</code> (một dạng <code>@Configuration</code>) + <code>@EnableAutoConfiguration</code> + <code>@ComponentScan</code>."
+  }
+]
+</script>
+
+<h2>Thử thách cuối bài</h2>
+<p>Gõ vào chat với teacher (Claude) câu trả lời <strong>3–4 câu</strong> cho câu hỏi phỏng vấn <em>"Auto-configuration hoạt động như thế nào?"</em>. Câu trả lời phải nhắc được: file imports, hai loại điều kiện, thứ tự nạp, và cách bạn kiểm chứng được. Mình sẽ chấm và chỉ ra chỗ còn hổng.</p>
+
+<hr>
+
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html">Spring Boot Reference — Creating Your Own Auto-configuration</a>. Đọc mục <em>Understanding Auto-configured Beans</em>, <em>Locating Auto-configuration Candidates</em> và <em>Condition Annotations</em> (~15 phút). Đây là chỗ team Spring giải thích cơ chế của chính họ.</p>
+<p>Tóm tắt để tra nhanh: <a href="../reference/auto-configuration.html">Cheat sheet: Auto-configuration</a>.</p>
+
+<p class="ask">Có chỗ nào chưa rõ, hoặc report có dòng nào lạ? Cứ hỏi teacher (Claude) trong chat. Ví dụ: "OnClassCondition kiểm tra class mà không cần load nó bằng cách nào?"</p>
+
+<div class="footer-nav no-print">
+  <span>← (bài đầu tiên)</span>
+  <span>Bài 2: sắp có →</span>
+</div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

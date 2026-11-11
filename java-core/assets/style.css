@@ -1,0 +1,132 @@
+/* Java Core course — shared stylesheet. Every lesson & reference page links this. */
+@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap");
+
+:root {
+  --bg: #fffff8;
+  --fg: #1d1d1b;
+  --muted: #6b6a63;
+  --rule: #e4e2d6;
+  --accent: #a3361f;      /* rust: headings, links */
+  --code-bg: #f4f2e8;
+  --stack: #2f6f8f;       /* stack / frame */
+  --heap: #b5651d;        /* heap / object */
+  --ok: #2e7d4f;
+  --bad: #b3261e;
+  --box-bg: #f7f5ec;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161614; --fg: #e9e7df; --muted: #a09e95; --rule: #34332e;
+    --accent: #e0876f; --code-bg: #22211e; --stack: #7fb7d4; --heap: #e3a361;
+    --ok: #6cc391; --bad: #f08a80; --box-bg: #1e1d1a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161614; --fg: #e9e7df; --muted: #a09e95; --rule: #34332e;
+  --accent: #e0876f; --code-bg: #22211e; --stack: #7fb7d4; --heap: #e3a361;
+  --ok: #6cc391; --bad: #f08a80; --box-bg: #1e1d1a; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { font-size: 18px; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: "Source Serif 4", Georgia, serif; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 42rem; margin: 0 auto; padding: 3rem 16px 5rem; }
+
+nav.crumbs { font-size: .8rem; color: var(--muted); margin-bottom: 2.5rem; letter-spacing: .02em; }
+nav.crumbs a { color: var(--muted); }
+
+h1 { font-size: 2.1rem; line-height: 1.15; margin: 0 0 .4rem; font-weight: 700; }
+.subtitle { font-style: italic; color: var(--muted); font-size: 1.1rem; margin: 0 0 2rem; }
+h2 { font-size: 1.35rem; margin: 2.8rem 0 .6rem; color: var(--accent); font-weight: 600; }
+h3 { font-size: 1.05rem; margin: 1.8rem 0 .4rem; }
+p, li { hyphens: auto; }
+a { color: var(--accent); text-underline-offset: 2px; }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 3rem 0; }
+
+code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .82em; }
+code { background: var(--code-bg); padding: .08em .3em; border-radius: 3px; }
+pre { background: var(--code-bg); padding: .9rem 1rem; border-radius: 4px; overflow-x: auto; line-height: 1.5; }
+pre code { background: none; padding: 0; font-size: 1em; }
+
+/* "Win" banner at top of each lesson */
+.goal { border-left: 3px solid var(--accent); padding: .3rem 0 .3rem 1rem; margin: 1.5rem 0 2rem; }
+.goal strong { display: block; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+
+/* Spec quotes */
+blockquote.spec { margin: 1.2rem 0; padding: .2rem 0 .2rem 1rem; border-left: 2px solid var(--rule); color: var(--muted); font-style: italic; }
+blockquote.spec cite { display: block; font-style: normal; font-size: .8rem; margin-top: .3rem; }
+
+/* Side notes: inline on narrow screens, in the margin on wide ones */
+.sidenote { display: block; font-size: .82rem; color: var(--muted); border-left: 2px solid var(--rule); padding-left: .7rem; margin: .8rem 0; }
+@media (min-width: 1100px) {
+  .sidenote { float: right; clear: right; width: 15rem; margin: 0 -18rem 1rem 0; border: 0; padding: 0; }
+}
+
+/* Callout boxes */
+.box { background: var(--box-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 1rem 1.2rem; margin: 1.5rem 0; }
+.box > :first-child { margin-top: 0; } .box > :last-child { margin-bottom: 0; }
+.box.key { border-color: var(--accent); }
+
+/* Diagrams (inline SVG) */
+figure { margin: 1.8rem 0; }
+figure svg { width: 100%; height: auto; display: block; }
+figcaption { font-size: .82rem; color: var(--muted); margin-top: .5rem; text-align: center; font-style: italic; }
+svg text { font-family: "JetBrains Mono", monospace; fill: var(--fg); font-size: 13px; }
+svg .label { font-family: "Source Serif 4", serif; font-size: 14px; font-weight: 600; }
+svg .region-stack { fill: none; stroke: var(--stack); stroke-width: 1.5; stroke-dasharray: 5 4; }
+svg .region-heap { fill: none; stroke: var(--heap); stroke-width: 1.5; stroke-dasharray: 5 4; }
+svg .frame { fill: var(--box-bg); stroke: var(--stack); stroke-width: 1.5; }
+svg .obj { fill: var(--box-bg); stroke: var(--heap); stroke-width: 1.5; }
+svg .stack-t { fill: var(--stack); } svg .heap-t { fill: var(--heap); }
+svg .muted-t { fill: var(--muted); font-size: 12px; }
+svg .arrow { stroke: var(--fg); stroke-width: 1.4; fill: none; }
+svg .arrow.dead { stroke: var(--muted); stroke-dasharray: 3 3; }
+svg .ah { fill: var(--fg); }
+
+/* Tables (reference pages) */
+table { border-collapse: collapse; width: 100%; font-size: .9rem; margin: 1rem 0; }
+th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: .78rem; letter-spacing: .05em; text-transform: uppercase; }
+.table-wrap { overflow-x: auto; }
+
+/* Retrieval prompts */
+details.recall { border: 1px dashed var(--rule); border-radius: 6px; padding: .7rem 1rem; margin: 1.2rem 0; }
+details.recall summary { cursor: pointer; font-weight: 600; }
+details.recall[open] summary { margin-bottom: .6rem; }
+
+/* Quiz widget (assets/quiz.js) */
+.quiz { margin: 1.6rem 0; padding: 1rem 1.2rem; border: 1px solid var(--rule); border-radius: 6px; }
+.quiz .q { font-weight: 600; margin: 0 0 .6rem; }
+.quiz .opts { display: flex; flex-wrap: wrap; gap: .5rem; }
+.quiz button {
+  font: inherit; font-size: .9rem; padding: .45rem .9rem; border-radius: 4px; cursor: pointer;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--rule); min-width: 5rem;
+}
+.quiz button:hover:not(:disabled) { border-color: var(--accent); }
+.quiz button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.quiz button.correct { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+.quiz button.wrong { border-color: var(--bad); color: var(--bad); text-decoration: line-through; }
+.quiz button:disabled { cursor: default; }
+.quiz .explain { display: none; margin-top: .8rem; font-size: .9rem; }
+.quiz.answered .explain { display: block; }
+.quiz-score { font-weight: 600; text-align: center; padding: .8rem; border-top: 1px solid var(--rule); }
+
+/* Footer blocks */
+.next, .ask { font-size: .95rem; }
+.ask { color: var(--muted); font-style: italic; }
+
+@media print {
+  :root { --bg: #fff; --fg: #000; }
+  main { max-width: none; padding: 0; }
+  nav.crumbs, .quiz .opts { display: none; }
+  .quiz .explain { display: block; }
+  .sidenote { float: none; width: auto; margin: .5rem 0; }
+  a { color: inherit; }
+  h2 { break-after: avoid; }
+  figure, pre, .box { break-inside: avoid; }
+}

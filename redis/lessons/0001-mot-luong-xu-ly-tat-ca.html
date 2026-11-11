@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Một luồng xử lý tất cả</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Redis · Bài 1 · <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet</a></nav>
+
+<h1>Một luồng xử lý tất cả</h1>
+<p class="subtitle">Vì sao Redis nhanh, và vì sao chỉ một lệnh chậm cũng đủ làm cả hệ thống đứng hình. ~15 phút.</p>
+
+<div class="box goal">
+  <span class="label">Sau bài này bạn sẽ</span>
+  Tự tay chạy Redis, tạo key có TTL, rồi <strong>tái hiện một sự cố latency thật</strong>: một client làm treo mọi client khác. Bạn cũng sẽ biết chỉ số nào trên ElastiCache báo hiệu đúng sự cố đó.
+</div>
+
+<h2>1. Ý chính: dữ liệu nằm trong RAM, lệnh chạy trên một luồng</h2>
+
+<p>Redis là một <strong>key-value store in-memory</strong>: mọi dữ liệu nằm trong RAM, nên đọc/ghi một key thường mất chưa tới 1 micro-giây phía server. Đĩa chỉ dùng để lưu bản sao (sẽ học ở bài RDB/AOF).</p>
+
+<p>Điều quan trọng hơn: Redis thực thi lệnh trên <strong>một luồng chính duy nhất</strong>. Hàng nghìn client gửi lệnh tới, nhưng các lệnh được xếp hàng và chạy <em>lần lượt từng lệnh một</em>. Tài liệu chính thức nói thẳng hệ quả:
+<a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/">trong lúc một request chậm đang được xử lý, mọi client khác phải chờ</a>.</p>
+
+<figure>
+<svg viewBox="0 0 640 190" role="img" aria-label="Nhiều client gửi lệnh vào một hàng đợi, một luồng chính thực thi từng lệnh">
+  <style>
+    .t{font:13px system-ui,sans-serif;fill:var(--fg)} .m{font:11px system-ui,sans-serif;fill:var(--muted)}
+    .b{fill:var(--card);stroke:var(--rule)} .hot{fill:none;stroke:var(--accent);stroke-width:2}
+    .ln{stroke:var(--muted);stroke-width:1.2;fill:none}
+  </style>
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--muted)"/></marker></defs>
+  <rect class="b" x="10" y="20" width="90" height="30" rx="4"/><text class="t" x="55" y="40" text-anchor="middle">Client A</text>
+  <rect class="b" x="10" y="80" width="90" height="30" rx="4"/><text class="t" x="55" y="100" text-anchor="middle">Client B</text>
+  <rect class="b" x="10" y="140" width="90" height="30" rx="4"/><text class="t" x="55" y="160" text-anchor="middle">Client C</text>
+  <path class="ln" d="M100,35 C150,35 150,95 190,95" marker-end="url(#ar)"/>
+  <path class="ln" d="M100,95 L190,95" marker-end="url(#ar)"/>
+  <path class="ln" d="M100,155 C150,155 150,95 190,95" marker-end="url(#ar)"/>
+  <text class="m" x="200" y="68">hàng đợi lệnh</text>
+  <rect class="hot" x="200" y="80" width="70" height="30" rx="3"/><text class="t" x="235" y="100" text-anchor="middle">KEYS *</text>
+  <rect class="b" x="276" y="80" width="56" height="30" rx="3"/><text class="t" x="304" y="100" text-anchor="middle">GET</text>
+  <rect class="b" x="338" y="80" width="56" height="30" rx="3"/><text class="t" x="366" y="100" text-anchor="middle">SET</text>
+  <path class="ln" d="M400,95 L450,95" marker-end="url(#ar)"/>
+  <rect class="b" x="455" y="65" width="170" height="60" rx="6"/>
+  <text class="t" x="540" y="90" text-anchor="middle">Luồng chính</text>
+  <text class="m" x="540" y="108" text-anchor="middle">chạy 1 lệnh tại 1 thời điểm</text>
+  <text class="m" x="200" y="140">GET và SET phải chờ KEYS * chạy xong,</text>
+  <text class="m" x="200" y="155">dù bản thân chúng chỉ mất vài µs.</text>
+</svg>
+<figcaption>Lệnh nhanh xếp sau một lệnh chậm cũng thành chậm. Đây là gốc rễ của phần lớn sự cố latency với Redis.</figcaption>
+</figure>
+
+<p>Vì sao thiết kế như vậy mà vẫn nhanh? Vì làm việc với RAM nên mỗi lệnh thường rất ngắn, và một luồng thì không cần lock, không tốn chi phí chuyển ngữ cảnh. FAQ của Redis cho biết <a href="https://redis.io/docs/latest/develop/get-started/faq/">CPU hiếm khi là nút thắt; Redis thường bị giới hạn bởi bộ nhớ hoặc mạng</a>.</p>
+
+<p class="note">Lưu ý: Redis 6+ và Valkey có <em>I/O threads</em> để đọc/ghi socket song song, nhưng <strong>việc thực thi lệnh vẫn nằm trên một luồng</strong>. Bài sau sẽ đào sâu event loop.</p>
+
+<h3>Hệ quả trên production</h3>
+<p>Lệnh có độ phức tạp O(N) trên tập lớn, như <code>KEYS *</code> hay <code>SMEMBERS</code> trên một set khổng lồ, sẽ chặn mọi client khác. AWS khuyến nghị
+<a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/WorkingWithRedis.html">dùng <code>SCAN</code> / <code>SSCAN</code> thay cho <code>KEYS</code> / <code>SMEMBERS</code></a> chính vì lý do này.</p>
+
+<h2>2. Lab: tái hiện sự cố (~8 phút)</h2>
+
+<ol class="steps">
+<li><strong>Chạy Redis.</strong> Cờ <code>--enable-debug-command yes</code> chỉ dùng cho lab, để bật lệnh <code>DEBUG SLEEP</code> (mặc định Redis 7 chặn lệnh này).
+<pre><code>docker run -d --name redis-lab -p 6379:6379 redis:7.4 --enable-debug-command yes
+docker exec -it redis-lab redis-cli
+<span class="c">127.0.0.1:6379&gt; PING
+PONG</span></code></pre></li>
+
+<li><strong>Key và TTL.</strong> Tạo một key sống 10 giây, và một key không có hạn:
+<pre><code>SET session:42 "user=son" EX 10
+TTL session:42       <span class="c">→ 10   (còn bao nhiêu giây)</span>
+SET config:theme dark
+TTL config:theme     <span class="c">→ -1   (tồn tại, không có hạn)</span>
+<span class="c"># đợi hơn 10 giây</span>
+GET session:42       <span class="c">→ (nil)</span>
+TTL session:42       <span class="c">→ -2   (key không tồn tại)</span></code></pre>
+Ngữ nghĩa <code>-1</code>/<code>-2</code> nằm trong <a href="https://redis.io/docs/latest/commands/ttl/">tài liệu lệnh TTL</a>. Hãy nhớ kỹ, vì bạn sẽ dùng nó khi debug "sao cache không hết hạn".</li>
+
+<li><strong>Chặn luồng chính.</strong> Mở <em>hai terminal</em>. Ở terminal 1, giả lập một lệnh chậm 5 giây:
+<pre><code>docker exec redis-lab redis-cli DEBUG SLEEP 5</code></pre>
+Ngay lập tức, ở terminal 2:
+<pre><code>time docker exec redis-lab redis-cli PING</code></pre>
+<code>PING</code> là lệnh rẻ nhất có thể, vậy mà nó phải chờ gần hết 5 giây. Bạn vừa thấy tận mắt mô hình đơn luồng.</li>
+
+<li><strong>Tìm thủ phạm.</strong> Redis ghi lại mọi lệnh chạy lâu hơn <code>slowlog-log-slower-than</code> (mặc định 10000 µs = 10 ms):
+<pre><code>docker exec redis-lab redis-cli SLOWLOG GET 1
+<span class="c">1) id
+2) timestamp (unix)
+3) 5000102            ← thời gian chạy, tính bằng micro-giây
+4) DEBUG SLEEP 5      ← lệnh và tham số
+5) 127.0.0.1:59022    ← client nào gửi</span></code></pre>
+Đây là việc đầu tiên nên làm khi Redis "tự nhiên chậm": <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/">docs khuyên kiểm tra slow log trước tiên</a>.</li>
+</ol>
+
+<h2>3. Nối sang ElastiCache</h2>
+
+<p>Một node ElastiCache có nhiều vCPU, nhưng luồng chính của engine chỉ dùng <em>một</em> core. Vì vậy AWS có hai chỉ số CPU (<a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/CacheMetrics.WhichShouldIMonitor.html">tài liệu</a>):</p>
+<div class="table-wrap"><table>
+<tr><th>Metric</th><th>Đo gì</th><th>Bẫy</th></tr>
+<tr><td><code>CPUUtilization</code></td><td>Trung bình mọi core của node</td><td>Node 4 vCPU: luồng chính đã 100% nhưng chỉ số này có thể chỉ hiện ~25%</td></tr>
+<tr><td><code>EngineCPUUtilization</code></td><td>Chỉ luồng chính của engine</td><td>Đây mới là chỉ số phản ánh đúng sự cố bạn vừa tái hiện</td></tr>
+</table></div>
+<p>AWS khuyên dùng <code>EngineCPUUtilization</code> cho node từ 4 vCPU trở lên. Với node nhỏ (≤ 2 vCPU), dùng <code>CPUUtilization</code> và chia ngưỡng alarm cho số core.</p>
+
+<h2>4. Tự kiểm tra (đừng kéo lên xem lại)</h2>
+<p class="quiz-score">Điểm: 0/4</p>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Client A gửi một lệnh chạy mất 2 giây. Ngay sau đó client B gửi <code>GET</code>. B nhận kết quả khi nào?</p>
+  <button>Ngay lập tức vì lệnh GET rất nhẹ</button>
+  <button>Chỉ sau khi lệnh của A kết thúc</button>
+  <button>Ngay lập tức nhờ một luồng riêng khác</button>
+  <p class="explain">Lệnh được thực thi tuần tự trên một luồng. Độ nhẹ của GET không giúp được gì nếu nó xếp hàng sau một lệnh nặng.</p>
+</div>
+
+<div class="quiz" data-correct="2">
+  <p class="q">Vì sao Redis chạy lệnh trên một luồng mà vẫn rất nhanh?</p>
+  <button>Mỗi client được cấp một luồng riêng</button>
+  <button>Nó tự chia lệnh ra mọi core CPU</button>
+  <button>Dữ liệu nằm trong RAM, không cần lock</button>
+  <p class="explain">Thao tác trên RAM rất ngắn, và một luồng thì không tốn chi phí lock hay chuyển ngữ cảnh. CPU hiếm khi là nút thắt.</p>
+</div>
+
+<div class="quiz" data-correct="0">
+  <p class="q">Node ElastiCache 4 vCPU: <code>CPUUtilization</code> 25%, <code>EngineCPUUtilization</code> 98%. Kết luận đúng là gì?</p>
+  <button>Luồng chính đã bão hòa, cần xử lý ngay</button>
+  <button>Node còn dư nhiều, chưa cần làm gì cả</button>
+  <button>Chỉ I/O thread đang bận, bỏ qua được</button>
+  <p class="explain">25% ≈ một core chạy hết công suất chia cho 4. Luồng thực thi lệnh đã chạm trần, nên mọi client sẽ bắt đầu thấy latency tăng.</p>
+</div>
+
+<div class="quiz" data-correct="1">
+  <p class="q">Lệnh <code>TTL cache:product:7</code> trả về <code>-1</code>. Điều đó nghĩa là gì?</p>
+  <button>Key vừa hết hạn và đã bị xoá</button>
+  <button>Key tồn tại nhưng không có hạn</button>
+  <button>Key không tồn tại trong database</button>
+  <p class="explain"><code>-1</code> = có key nhưng không có expire. <code>-2</code> = không có key. Một key cache trả về <code>-1</code> trên production thường là bug: code đã quên đặt TTL, và key đó sẽ nằm trong RAM mãi mãi.</p>
+</div>
+
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/">Diagnosing latency issues, redis.io</a>. Đọc mục <em>"Single threaded nature of Redis"</em> và <em>"Latency generated by slow commands"</em> (~5 phút). Bạn sẽ gặp lại bài này ở nhiều bài học sau.</p>
+
+<div class="box">
+  <span class="label">Hỏi thầy</span>
+  Còn chỗ nào chưa rõ thì hỏi ngay agent trong terminal, ví dụ: <em>"nếu Redis đơn luồng thì sao Lettuce vẫn cần connection pool?"</em>. Khi xong lab và quiz, báo điểm để bài sau vừa sức bạn.
+</div>
+
+<p class="note">Dọn dẹp sau lab: <code>docker rm -f redis-lab</code></p>
+
+<footer>
+  Tham khảo: <a href="../reference/glossary.html">Thuật ngữ</a> · <a href="../reference/cli-cheatsheet.html">Cheatsheet redis-cli</a><br>
+  Bài tiếp theo: <a href="0002-ke-thu-la-round-trip.html">Bài 2: Kẻ thù là round-trip</a> →
+</footer>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

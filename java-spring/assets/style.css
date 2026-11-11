@@ -1,0 +1,88 @@
+/* Shared stylesheet for every lesson and reference page */
+:root {
+  --bg: #fffff8;
+  --fg: #1f1f1f;
+  --muted: #6b6b6b;
+  --rule: #e2e0d6;
+  --accent: #6d8c2f;      /* Spring green, muted */
+  --accent-soft: #eef3e2;
+  --code-bg: #f3f1e8;
+  --ok: #2f7d32;
+  --bad: #b3261e;
+  --note-bg: #fbf6e3;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161714; --fg: #e8e6df; --muted: #a09d93; --rule: #34352f;
+    --accent: #a5c56a; --accent-soft: #232a18; --code-bg: #22231f;
+    --ok: #81c784; --bad: #ef9a9a; --note-bg: #2a2718;
+  }
+}
+
+* { box-sizing: border-box; }
+html { font-size: 18px; }
+body {
+  margin: 0 auto; padding: 2.5rem 1rem 4rem; max-width: 44rem;
+  background: var(--bg); color: var(--fg);
+  font-family: var(--serif); line-height: 1.6;
+}
+h1 { font-weight: 400; font-size: 2rem; line-height: 1.2; margin: 0 0 .3rem; }
+h2 { font-weight: 400; font-style: italic; font-size: 1.4rem; margin: 2.4rem 0 .6rem; }
+h3 { font-weight: 600; font-size: 1rem; margin: 1.6rem 0 .4rem; }
+.subtitle { color: var(--muted); font-style: italic; margin: 0 0 2rem; }
+a { color: var(--accent); text-underline-offset: 2px; }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 2.5rem 0; }
+
+code, pre { font-family: var(--mono); font-size: .8rem; }
+code { background: var(--code-bg); padding: .1em .3em; border-radius: 3px; }
+pre {
+  background: var(--code-bg); padding: .9rem 1rem; border-radius: 6px;
+  overflow-x: auto; line-height: 1.45; border-left: 3px solid var(--accent);
+}
+pre code { background: none; padding: 0; }
+.hl { color: var(--accent); font-weight: 700; }
+.bad-hl { color: var(--bad); font-weight: 700; }
+
+.meta { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; color: var(--muted); font-size: .85rem; margin-bottom: 1.5rem; }
+.meta span::before { content: "◆ "; color: var(--accent); }
+
+.callout { background: var(--note-bg); padding: .8rem 1rem; border-radius: 6px; margin: 1.2rem 0; }
+.callout strong:first-child { display: block; margin-bottom: .2rem; }
+.big-idea { font-size: 1.2rem; font-style: italic; border-left: 3px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; }
+
+/* Step-by-step flow diagram */
+.flow { list-style: none; padding: 0; margin: 1.2rem 0; counter-reset: f; }
+.flow li {
+  counter-increment: f; position: relative; padding: .6rem .8rem .6rem 2.8rem;
+  border: 1px solid var(--rule); border-radius: 6px; margin-bottom: .5rem; background: var(--bg);
+}
+.flow li::before {
+  content: counter(f); position: absolute; left: .7rem; top: .6rem;
+  width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--accent); color: var(--bg);
+  font-size: .75rem; text-align: center; line-height: 1.4rem; font-family: var(--mono);
+}
+
+/* Lab steps */
+.lab { border: 1px solid var(--accent); border-radius: 8px; padding: .5rem 1.2rem 1rem; background: var(--accent-soft); }
+.lab h3 { color: var(--accent); }
+.lab ol > li { margin-bottom: .8rem; }
+details { margin: .6rem 0; }
+summary { cursor: pointer; color: var(--accent); }
+
+table { border-collapse: collapse; width: 100%; font-size: .9rem; margin: 1rem 0; }
+th, td { border-bottom: 1px solid var(--rule); padding: .4rem .5rem; text-align: left; vertical-align: top; }
+th { font-weight: 600; }
+
+.footer-nav { display: flex; justify-content: space-between; gap: 1rem; font-size: .9rem; }
+.ask { color: var(--muted); font-style: italic; }
+.cite { font-size: .75rem; vertical-align: super; }
+
+@media print {
+  :root { --bg: #fff; --fg: #000; }
+  body { max-width: none; padding: 0; font-size: 11pt; }
+  .quiz button, .no-print { display: none; }
+  pre { white-space: pre-wrap; }
+  a { color: inherit; }
+}

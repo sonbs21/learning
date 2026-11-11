@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cấu hình Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Cấu hình</h1>
+<p class="subtitle">Cheat sheet · từ <a href="../lessons/0005-cau-hinh-properties-profile.html">Bài 5</a></p>
+
+<h2>Đọc giá trị</h2>
+<pre><code># application.properties
+shop.name=Son Shop
+shop.hotline=1900-1234
+
+// Một giá trị
+public OrderService(@Value("${shop.name}") String shopName) { ... }
+@Value("${shop.name:Mặc định}")        // có giá trị dự phòng
+
+// Một nhóm giá trị (khuyên dùng)
+@ConfigurationProperties(prefix = "shop")
+public record ShopProperties(String name, String hotline) {}
+
+@SpringBootApplication
+@ConfigurationPropertiesScan           // bắt buộc, nếu không sẽ không có bean ShopProperties</code></pre>
+
+<h2>Thứ tự ghi đè (rút gọn, yếu → mạnh)</h2>
+<ol class="flow">
+  <li><code>application.properties</code></li>
+  <li><code>application-{profile}.properties</code></li>
+  <li>Biến môi trường: <code>SHOP_NAME=...</code></li>
+  <li>Tham số dòng lệnh: <code>--shop.name=...</code></li>
+</ol>
+
+<h2>Lệnh hay dùng</h2>
+<pre><code>mvn spring-boot:run -Dspring-boot.run.arguments=--shop.name=TestShop
+mvn spring-boot:run -Dspring-boot.run.arguments=--spring.profiles.active=dev
+java -jar app.jar --server.port=9090
+SHOP_NAME=Prod java -jar app.jar</code></pre>
+
+<h2>Lỗi thường gặp</h2>
+<table>
+  <tr><th>Thông báo</th><th>Nguyên nhân</th></tr>
+  <tr><td><code>Could not resolve placeholder 'x'</code></td><td>Không có key <code>x</code> ở bất kỳ nguồn nào. Kiểm tra chính tả hoặc thêm giá trị mặc định.</td></tr>
+  <tr><td><code>required a bean of type '...Properties'</code></td><td>Thiếu <code>@ConfigurationPropertiesScan</code></td></tr>
+</table>
+
+<p>Không commit mật khẩu thật. Trên server, dùng biến môi trường hoặc secret manager.</p>
+<p>Nguồn: <a href="https://docs.spring.io/spring-boot/reference/features/external-config.html">Spring Boot Reference: Externalized Configuration</a></p>
+</body>
+</html>

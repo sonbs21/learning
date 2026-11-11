@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>redis-cli Cheatsheet</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs">Redis · Tham khảo · <a href="glossary.html">Thuật ngữ</a></nav>
+<h1>Cheatsheet redis-cli</h1>
+<p class="subtitle">Lệnh đã học, theo nhóm. Cập nhật sau mỗi bài.</p>
+
+<h2>Lab</h2>
+<pre><code>docker run -d --name redis-lab -p 6379:6379 redis:7.4 --enable-debug-command yes
+docker exec -it redis-lab redis-cli
+docker rm -f redis-lab</code></pre>
+
+<h2>Key &amp; TTL</h2>
+<div class="table-wrap"><table>
+<tr><th>Lệnh</th><th>Tác dụng</th></tr>
+<tr><td><code>SET k v EX 10</code></td><td>Ghi key, sống 10 giây</td></tr>
+<tr><td><code>GET k</code></td><td>Đọc; <code>(nil)</code> nếu không có</td></tr>
+<tr><td><code>TTL k</code></td><td>Số giây còn lại · <code>-1</code> không hạn · <code>-2</code> không tồn tại</td></tr>
+<tr><td><code>EXPIRE k 60</code></td><td>Đặt hạn cho key đã có (<a href="https://redis.io/docs/latest/commands/expire/">docs</a>)</td></tr>
+</table></div>
+
+<h2>Chẩn đoán</h2>
+<div class="table-wrap"><table>
+<tr><th>Lệnh</th><th>Tác dụng</th></tr>
+<tr><td><code>SLOWLOG GET 10</code></td><td>10 lệnh chậm gần nhất: id, thời điểm, thời gian (µs), lệnh, client</td></tr>
+<tr><td><code>CONFIG GET slowlog-log-slower-than</code></td><td>Ngưỡng ghi slow log (µs)</td></tr>
+<tr><td><code>DEBUG SLEEP 5</code></td><td>Chỉ dùng cho lab: chặn luồng chính 5 giây</td></tr>
+</table></div>
+
+<h2>Hiệu năng &amp; bộ nhớ</h2>
+<div class="table-wrap"><table>
+<tr><th>Lệnh</th><th>Tác dụng</th></tr>
+<tr><td><code>MGET k1 k2 k3</code></td><td>Đọc nhiều key trong 1 lần đi và về</td></tr>
+<tr><td><code>redis-benchmark -q -t set,get -n 200000 [-P 16]</code></td><td>Đo throughput, <code>-P</code> = số lệnh pipeline mỗi lần</td></tr>
+<tr><td><code>OBJECT ENCODING k</code></td><td>Encoding: int / embstr / raw / listpack / hashtable / intset / skiplist / quicklist</td></tr>
+<tr><td><code>MEMORY USAGE k</code></td><td>Số byte key đang chiếm</td></tr>
+<tr><td><code>CONFIG GET '*-max-*'</code></td><td>Xem các ngưỡng chuyển encoding (hash: 512 field / 64 byte trên 7.4)</td></tr>
+</table></div>
+<p class="note">Spring: <code>opsForValue().multiGet(keys)</code> · <code>redisTemplate.executePipelined(SessionCallback)</code> (callback trả về <code>null</code>). Xem <a href="../lessons/0002-ke-thu-la-round-trip.html">Bài 2</a>, <a href="../lessons/0003-cung-la-hash-khac-bo-nho.html">Bài 3</a>.</p>
+
+<h2>Expiry, transaction, Lua</h2>
+<div class="table-wrap"><table>
+<tr><th>Lệnh</th><th>Tác dụng</th></tr>
+<tr><td><code>INFO keyspace</code></td><td><code>keys=… expires=… avg_ttl=…</code>; expires thấp hơn keys nhiều = nghi mất TTL</td></tr>
+<tr><td><code>INFO stats | grep expired_</code></td><td>Số key đã hết hạn, tỷ lệ key "đã chết" còn sót</td></tr>
+<tr><td><code>MULTI … EXEC</code> / <code>DISCARD</code></td><td>Transaction không rollback</td></tr>
+<tr><td><code>WATCH k</code></td><td>Huỷ EXEC (trả nil) nếu k đổi</td></tr>
+<tr><td><code>EVAL "script" numkeys k… arg…</code></td><td>Chạy Lua nguyên tử</td></tr>
+<tr><td><code>SCRIPT KILL</code></td><td>Dừng script chưa ghi; đã ghi thì <code>UNKILLABLE</code></td></tr>
+</table></div>
+
+<h2>Bộ nhớ &amp; persistence</h2>
+<div class="table-wrap"><table>
+<tr><th>Lệnh</th><th>Tác dụng</th></tr>
+<tr><td><code>CONFIG GET maxmemory-policy</code></td><td>Policy eviction hiện tại</td></tr>
+<tr><td><code>INFO stats | grep evicted_keys</code></td><td>Số key đã bị eviction</td></tr>
+<tr><td><code>BGSAVE</code></td><td>Snapshot RDB ở nền (fork)</td></tr>
+<tr><td><code>INFO stats | grep latest_fork_usec</code></td><td>Lần fork gần nhất chặn luồng chính bao lâu (µs)</td></tr>
+<tr><td><code>INFO persistence</code></td><td><code>rdb_last_cow_size</code>, <code>rdb_last_bgsave_status</code>, <code>aof_enabled</code>…</td></tr>
+<tr><td><code>CONFIG SET appendonly yes</code></td><td>Bật AOF khi đang chạy</td></tr>
+<tr><td><code>BGREWRITEAOF</code></td><td>Rewrite AOF (fork)</td></tr>
+</table></div>
+
+<h2>Tránh trên production</h2>
+<div class="table-wrap"><table>
+<tr><th>Đừng dùng</th><th>Dùng thay</th></tr>
+<tr><td><code>KEYS *</code></td><td><code>SCAN</code></td></tr>
+<tr><td><code>SMEMBERS</code> trên set lớn</td><td><code>SSCAN</code></td></tr>
+<tr><td>Vòng lặp <code>GET</code> từng key</td><td><code>MGET</code> / pipeline</td></tr>
+<tr><td>Pipeline hàng triệu lệnh một lần</td><td>Chia mẻ ~10k lệnh</td></tr>
+<tr><td><code>SET</code> lại key cache không kèm TTL</td><td>Luôn truyền <code>EX</code> / <code>Duration</code></td></tr>
+<tr><td>Script Lua dài / vòng lặp lớn</td><td>Script ngắn, chia nhỏ việc</td></tr>
+<tr><td>Hạ <code>maxmemory</code> đột ngột</td><td>Hạ dần, theo dõi <code>evicted_keys</code></td></tr>
+</table></div>
+<p class="note">Nguồn: <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/WorkingWithRedis.html">ElastiCache best practices</a> · <a href="../lessons/0001-mot-luong-xu-ly-tat-ca.html">Bài 1</a></p>
+</main>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Equals HashCode HashMap</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="lo-trinh.html">Lộ trình</a> · Reference · Từ <a href="../lessons/0002-so-sanh-bang-va-equals.html">Bài 2</a>–<a href="../lessons/0004-hashmap-ben-trong.html">4</a></nav>
+<h1>equals · hashCode · HashMap</h1>
+<p class="subtitle">Một trang để ôn trước buổi phỏng vấn.</p>
+
+<h2><code>==</code> và <code>equals</code></h2>
+<div class="table-wrap"><table>
+<tr><th>Biểu thức</th><th>Kết quả</th><th>Vì sao</th></tr>
+<tr><td><code>"hi" == "hi"</code></td><td>true</td><td>Literal được intern (JLS §3.10.5)</td></tr>
+<tr><td><code>new String("hi") == "hi"</code></td><td>false</td><td><code>new</code> luôn tạo object mới</td></tr>
+<tr><td><code>("h"+"i") == "hi"</code></td><td>true</td><td>Biểu thức hằng, tính lúc compile</td></tr>
+<tr><td><code>(h+"i") == "hi"</code>, <code>h</code> không final</td><td>false</td><td>Nối lúc runtime, tạo object mới</td></tr>
+<tr><td><code>Integer 127 == 127</code></td><td>true</td><td>Cache −128..127 (JLS §5.1.7)</td></tr>
+<tr><td><code>Integer 128 == 128</code></td><td>false*</td><td>Ngoài khoảng cache bắt buộc (*mặc định)</td></tr>
+<tr><td><code>obj.equals(other)</code>, không override</td><td>như <code>==</code></td><td><code>Object.equals</code> mặc định</td></tr>
+</table></div>
+<p><strong>Quy tắc:</strong> <code>==</code> cho primitive, enum, null. <code>equals</code> / <code>Objects.equals</code> cho mọi trường hợp so sánh nội dung.</p>
+
+<h2>Hợp đồng</h2>
+<div class="box key"><p><code>a.equals(b)</code> ⇒ <code>a.hashCode() == b.hashCode()</code> (bắt buộc).<br>Chiều ngược lại không đúng: collision là hợp lệ (<code>"Aa"</code>, <code>"BB"</code> → 2112).<br>Override <code>equals</code> thì phải override <code>hashCode</code>, dùng <em>cùng một tập field</em>. Key nên immutable. Có thể dùng <code>record</code>.</p></div>
+
+<h2>HashMap: các con số (OpenJDK 21)</h2>
+<div class="table-wrap"><table>
+<tr><th>Hằng số</th><th>Giá trị</th><th>Ý nghĩa</th></tr>
+<tr><td><code>DEFAULT_INITIAL_CAPACITY</code></td><td>16</td><td>Cấp phát lazy ở lần <code>put</code> đầu</td></tr>
+<tr><td><code>DEFAULT_LOAD_FACTOR</code></td><td>0.75</td><td>threshold = cap × 0.75 = 12; put thứ 13 thì resize ×2</td></tr>
+<tr><td><code>TREEIFY_THRESHOLD</code></td><td>8</td><td>Bucket ≥ 8 node thì cân nhắc chuyển thành cây đỏ-đen</td></tr>
+<tr><td><code>MIN_TREEIFY_CAPACITY</code></td><td>64</td><td>Bảng &lt; 64 thì resize thay vì treeify</td></tr>
+<tr><td><code>UNTREEIFY_THRESHOLD</code></td><td>6</td><td>Cây ≤ 6 node (khi resize) thì chuyển lại thành list</td></tr>
+</table></div>
+
+<h2><code>put</code> trong 5 bước</h2>
+<ol>
+  <li><code>hash = h ^ (h &gt;&gt;&gt; 16)</code> (key null có hash 0)</li>
+  <li><code>index = (n - 1) &amp; hash</code> (n luôn là lũy thừa của 2)</li>
+  <li>Bucket rỗng thì đặt node. Có rồi thì so <code>hash</code>, sau đó <code>==</code> hoặc <code>equals</code>; trùng key thì ghi đè value</li>
+  <li>Không trùng thì nối vào cuối list; list ≥ 8 thì treeify (hoặc resize nếu bảng &lt; 64)</li>
+  <li><code>++size &gt; threshold</code> thì resize ×2</li>
+</ol>
+<p><code>get</code>: trung bình O(1); xấu nhất O(log n) với cây, O(n) với list. Không thread-safe: dùng <code>ConcurrentHashMap</code> khi có nhiều thread.</p>
+</main>
+</body>
+</html>

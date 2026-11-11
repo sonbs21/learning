@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auto-configuration Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Auto-configuration</h1>
+<p class="subtitle">Cheat sheet · Spring Boot 3.x · từ <a href="../lessons/0001-auto-configuration-khong-phai-phep-mau.html">Bài 1</a></p>
+
+<h2>Cơ chế trong một câu</h2>
+<p>Các class <code>@AutoConfiguration</code> (thực chất là <code>@Configuration</code>) được liệt kê trong <code>META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports</code>. Chúng được xét <strong>sau</strong> bean của bạn, và chỉ có hiệu lực khi các điều kiện <code>@Conditional…</code> đạt.</p>
+
+<h2>Các điều kiện hay gặp</h2>
+<table>
+  <tr><th>Annotation</th><th>Đạt khi</th><th>Ý nghĩa thực tế</th></tr>
+  <tr><td><code>@ConditionalOnClass</code></td><td>class có trên classpath</td><td>bạn đã thêm dependency</td></tr>
+  <tr><td><code>@ConditionalOnMissingClass</code></td><td>class không có</td><td>chọn phương án dự phòng</td></tr>
+  <tr><td><code>@ConditionalOnMissingBean</code></td><td>chưa có bean kiểu đó</td><td>bean của bạn thắng (back off)</td></tr>
+  <tr><td><code>@ConditionalOnBean</code></td><td>đã có bean kiểu đó</td><td>chỉ cấu hình thêm khi có nền</td></tr>
+  <tr><td><code>@ConditionalOnProperty</code></td><td>property khớp giá trị</td><td>bật/tắt bằng config</td></tr>
+  <tr><td><code>@ConditionalOnWebApplication</code></td><td>app là web app</td><td>servlet/reactive</td></tr>
+</table>
+<p>Nguồn: <a href="https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html#features.developing-auto-configuration.condition-annotations">Condition Annotations</a></p>
+
+<h2>Lệnh chẩn đoán</h2>
+<pre><code># In Conditions Evaluation Report khi khởi động
+java -jar app.jar --debug
+mvn spring-boot:run -Dspring-boot.run.arguments=--debug
+
+# Có Actuator: xem report qua HTTP
+GET /actuator/conditions
+
+# Liệt kê các auto-config ứng viên của một jar
+unzip -p &lt;jar&gt; META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports</code></pre>
+
+<h2>Đọc report</h2>
+<table>
+  <tr><th>Mục</th><th>Nghĩa</th></tr>
+  <tr><td>Positive matches</td><td>điều kiện đạt, bean/config <strong>đã được tạo</strong></td></tr>
+  <tr><td>Negative matches</td><td>điều kiện trượt, <strong>bị bỏ qua</strong>, kèm lý do</td></tr>
+  <tr><td>Exclusions</td><td>bị loại bỏ bằng <code>exclude</code></td></tr>
+  <tr><td>Unconditional classes</td><td>luôn được nạp, không có điều kiện</td></tr>
+</table>
+
+<h2>Tắt một auto-config</h2>
+<pre><code>@SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
+# hoặc
+spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration</code></pre>
+
+<h2>Bẫy cần nhớ</h2>
+<ul>
+  <li>Chỉ dùng <code>@ConditionalOnBean</code> và <code>@ConditionalOnMissingBean</code> trong class auto-config. Đặt trong config của bạn thì thứ tự nạp không được đảm bảo.</li>
+  <li>Report trượt ở <code>OnClassCondition</code> nghĩa là thiếu <strong>dependency</strong>, thêm property cũng không giúp gì.</li>
+  <li><code>@SpringBootApplication</code> = <code>@SpringBootConfiguration</code> + <code>@EnableAutoConfiguration</code> + <code>@ComponentScan</code>.</li>
+</ul>
+
+</body>
+</html>

@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chọn bean khi có nhiều ứng viên</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Có nhiều ứng viên, Spring chọn bean nào?</h1>
+<p class="subtitle">Bài 2 · <code>@Primary</code>, <code>@Qualifier</code> và cách nhận <em>tất cả</em> bean cùng kiểu</p>
+<div class="meta"><span>~35 phút</span><span>Cần: <a href="0001-vi-sao-can-spring.html">Bài 1</a></span><span>Lab: <code>./lab</code></span></div>
+
+<p>Ở Thí nghiệm B của bài 1, bạn đã gặp lỗi <code>required a single bean, but 2 were found</code>. Chuyện này rất hay xảy ra trong dự án thật: một interface thường có nhiều cách cài đặt (email/SMS, MySQL/Postgres, thanh toán Momo/VNPay…). Bài này dạy bạn ba cách để nói cho Spring biết bạn muốn bean nào.</p>
+
+<h2>1 · Vì sao Spring không tự chọn?</h2>
+<p>Constructor của <code>OrderService</code> chỉ nói "tôi cần <strong>một</strong> <code>EmailSender</code>". Trong container lại có hai bean thoả điều kiện đó. Nếu Spring tự đoán, app của bạn có thể gửi SMS cho khách mà không ai hay biết. Vì vậy Spring chọn cách an toàn hơn: <strong>dừng lại và báo lỗi</strong>.</p>
+
+<h2>2 · Ba cách giải quyết</h2>
+<table>
+  <tr><th>Cách</th><th>Đặt ở đâu</th><th>Ý nghĩa</th></tr>
+  <tr><td><code>@Primary</code></td><td>Trên <strong>class được chọn</strong></td><td>"Nếu không ai nói gì thêm thì dùng tôi." Đây là lựa chọn mặc định.</td></tr>
+  <tr><td><code>@Qualifier("tênBean")</code></td><td>Trên <strong>chỗ nhận</strong> (tham số constructor)</td><td>"Chỗ này tôi cần đúng bean tên này." Đây là chỉ định đích danh.</td></tr>
+  <tr><td><code>List&lt;EmailSender&gt;</code></td><td>Kiểu của tham số</td><td>"Đưa tôi <em>tất cả</em> bean thuộc kiểu này."</td></tr>
+</table>
+
+<div class="callout">
+  <strong>Quy tắc cần nhớ</strong>
+  <code>@Primary</code> là <em>mặc định chung</em>, còn <code>@Qualifier</code> là <em>yêu cầu cụ thể</em> tại một chỗ. Khi có cả hai thì yêu cầu cụ thể thắng. Docs của Spring cũng mô tả <code>@Qualifier</code> là cách kiểm soát việc chọn bean chặt chẽ hơn <code>@Primary</code>. <a class="cite" href="https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/autowired-qualifiers.html">[docs]</a>
+</div>
+
+<p>Nhắc lại từ bài 1: tên bean mặc định là tên class với chữ cái đầu viết thường, nên <code>SmsSender</code> có tên là <code>smsSender</code>. <code>@Qualifier</code> dùng chính tên này.</p>
+
+<hr>
+
+<h2>3 · Thực hành</h2>
+<div class="lab">
+<h3>Lab 2 · ~20 phút</h3>
+<p>Bắt đầu từ trạng thái cuối bài 1: có <code>EmailSender</code>, <code>ConsoleEmailSender</code> và <code>OrderService</code>.</p>
+<ol>
+  <li><strong>Tạo lại lỗi.</strong> Tạo <code>SmsSender.java</code>:
+<pre><code>package dev.lab;
+
+import org.springframework.stereotype.Component;
+
+@Component
+public class SmsSender implements EmailSender {
+
+    @Override
+    public void send(String to, String message) {
+        System.out.println("Gửi SMS tới " + to + ": " + message);
+    }
+}</code></pre>
+  Chạy <code>mvn -o -q spring-boot:run</code>. Bạn sẽ gặp lại lỗi "2 were found".</li>
+
+  <li><strong>Cách 1: <code>@Primary</code>.</strong> Thêm <code>@Primary</code> (import <code>org.springframework.context.annotation.Primary</code>) lên <code>ConsoleEmailSender</code>:
+<pre><code><span class="hl">@Primary</span>
+@Component
+public class ConsoleEmailSender implements EmailSender { ... }</code></pre>
+  Chạy lại. <strong>Đoán trước:</strong> app sẽ gửi email hay SMS?</li>
+
+  <li><strong>Cách 2: <code>@Qualifier</code>.</strong> Giữ nguyên <code>@Primary</code>, nhưng sửa constructor của <code>OrderService</code> (import <code>org.springframework.beans.factory.annotation.Qualifier</code>):
+<pre><code>public OrderService(<span class="hl">@Qualifier("smsSender")</span> EmailSender emailSender) {</code></pre>
+  Chạy lại. Bây giờ bean nào thắng?</li>
+
+  <li><strong>Gõ sai tên.</strong> Đổi thành <code>@Qualifier("smsSendr")</code>, thiếu chữ "e". Chạy lại và đọc kỹ lỗi.</li>
+
+  <li><strong>Cách 3: nhận tất cả.</strong> Bỏ <code>@Qualifier</code> khỏi <code>OrderService</code>. Tạo <code>NotificationService.java</code>:
+<pre><code>package dev.lab;
+
+import java.util.List;
+import org.springframework.stereotype.Component;
+
+@Component
+public class NotificationService {
+
+    private final List&lt;EmailSender&gt; senders;
+
+    public NotificationService(List&lt;EmailSender&gt; senders) {
+        this.senders = senders;
+    }
+
+    public void broadcast(String to, String message) {
+        System.out.println("Có " + senders.size() + " kênh gửi");
+        senders.forEach(sender -&gt; sender.send(to, message));
+    }
+}</code></pre>
+  Trong <code>main</code>, ngay sau dòng <code>placeOrder</code>, thêm:
+<pre><code>context.getBean(NotificationService.class).broadcast("an@example.com", "Khuyến mãi 50%!");</code></pre></li>
+</ol>
+
+<details>
+  <summary>Kết quả mong đợi (mở sau khi đã tự đoán)</summary>
+<pre><code># Bước 2: @Primary
+Gửi email tới an@example.com: Cảm ơn bạn đã đặt hàng!
+
+# Bước 3: @Qualifier("smsSender") thắng @Primary
+Gửi SMS tới an@example.com: Cảm ơn bạn đã đặt hàng!
+
+# Bước 4: gõ sai tên
+Parameter 0 of constructor in dev.lab.OrderService required a bean of type
+'dev.lab.EmailSender' <span class="bad-hl">that could not be found.</span>
+The injection point has the following annotations:
+	- @org.springframework.beans.factory.annotation.Qualifier("smsSendr")
+
+# Bước 5: List nhận cả hai bean
+Có 2 kênh gửi
+Gửi email tới an@example.com: Khuyến mãi 50%!
+Gửi SMS tới an@example.com: Khuyến mãi 50%!</code></pre>
+  <p>Để ý ở bước 4: Spring <strong>không</strong> lặng lẽ quay về dùng bean <code>@Primary</code>. Bạn đã yêu cầu đích danh một tên thì tên đó phải tồn tại. Thông báo lỗi còn chỉ rõ annotation nào gây ra lỗi.</p>
+</details>
+
+<p><strong>Trạng thái để sang bài 3:</strong> giữ <code>@Primary</code> trên <code>ConsoleEmailSender</code>, không có <code>@Qualifier</code> trong <code>OrderService</code>, giữ <code>SmsSender</code> và <code>NotificationService</code>. Xoá dòng <code>broadcast</code> trong <code>main</code> cho output gọn.</p>
+</div>
+
+<hr>
+
+<h2>4 · Kiểm tra trí nhớ</h2>
+<div class="quiz" data-quiz="q2"></div>
+<script type="application/json" id="q2">
+[
+  {
+    "q": "Có <code>ConsoleEmailSender</code> (gắn <code>@Primary</code>) và <code>SmsSender</code>. Constructor của <code>OrderService</code> không có <code>@Qualifier</code>. Bean nào được tiêm vào?",
+    "options": [
+      "SmsSender, vì Spring luôn chọn bean được tạo ra sau cùng",
+      "ConsoleEmailSender, vì nó được đánh dấu là lựa chọn mặc định",
+      "Cả hai, vì Spring tự gộp chúng thành một bean chung"
+    ],
+    "answer": 1,
+    "why": "Không ai yêu cầu gì cụ thể thì Spring dùng bean <code>@Primary</code>."
+  },
+  {
+    "q": "Vẫn để <code>@Primary</code> ở <code>ConsoleEmailSender</code>, nhưng constructor ghi <code>@Qualifier(\"smsSender\")</code>. Kết quả là gì?",
+    "options": [
+      "Gửi email, vì @Primary luôn được ưu tiên cao nhất",
+      "Lỗi khởi động, vì hai annotation này mâu thuẫn nhau",
+      "Gửi SMS, vì @Qualifier chỉ đích danh nên thắng @Primary"
+    ],
+    "answer": 2,
+    "why": "<code>@Qualifier</code> là yêu cầu cụ thể tại đúng chỗ nhận, nên nó thắng mặc định chung <code>@Primary</code>."
+  },
+  {
+    "q": "Gõ nhầm <code>@Qualifier(\"smsSendr\")</code>. Chuyện gì xảy ra?",
+    "options": [
+      "Spring báo không tìm thấy bean vì không có bean tên đó",
+      "Spring bỏ qua qualifier sai và dùng bean @Primary để thay thế",
+      "Spring tự sửa lại thành smsSender vì hai tên gần giống nhất"
+    ],
+    "answer": 0,
+    "why": "Lỗi <code>could not be found</code> kèm dòng <code>The injection point has the following annotations: @Qualifier(\"smsSendr\")</code>. Spring không bao giờ đoán thay bạn."
+  },
+  {
+    "q": "Muốn gửi qua <em>tất cả</em> các kênh, <code>NotificationService</code> nên nhận gì trong constructor?",
+    "options": [
+      "Một EmailSender có @Primary, rồi tự gọi từng kênh một",
+      "Toàn bộ ApplicationContext, rồi tự tìm bean bằng tên class",
+      "Một List<EmailSender>, Spring sẽ tiêm mọi bean khớp kiểu đó"
+    ],
+    "answer": 2,
+    "why": "Khi tham số có kiểu <code>List&lt;X&gt;</code>, Spring tiêm vào mọi bean thuộc kiểu X. Đây cũng chính là gợi ý \"accept multiple beans\" trong thông báo lỗi ở bài 1."
+  }
+]
+</script>
+
+<h2>5 · Thử thách</h2>
+<p>Trả lời trong chat với teacher (Claude):</p>
+<ol>
+  <li>Dự án có 2 cổng thanh toán là <code>MomoPayment</code> và <code>VnPayPayment</code>. Hầu hết chỗ trong code dùng Momo, riêng <code>RefundService</code> phải dùng VNPay. Bạn sẽ đặt annotation nào, ở đâu?</li>
+  <li><em>Ôn bài 1:</em> IoC là viết tắt của gì, và cái gì bị "đảo ngược"?</li>
+</ol>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/autowired-primary.html">Spring Framework Reference: Fine-tuning Annotation-based Autowiring with @Primary</a> và trang ngay sau đó về <a href="https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/autowired-qualifiers.html">@Qualifier</a>. Mỗi trang đọc khoảng 5 phút.</p>
+<p>Tra nhanh: <a href="../reference/ioc-di.html">Cheat sheet: IoC, DI &amp; Bean</a>.</p>
+<p class="ask">Có gì chưa rõ thì cứ hỏi teacher (Claude). Ví dụ: "Có thể đặt tên bean khác với tên class không?"</p>
+
+<div class="footer-nav no-print">
+  <a href="0001-vi-sao-can-spring.html">← Bài 1: Vì sao cần Spring</a>
+  <a href="0003-configuration-va-bean.html">Bài 3: @Configuration &amp; @Bean →</a>
+</div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

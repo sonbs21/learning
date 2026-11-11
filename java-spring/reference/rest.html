@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REST Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>REST với Spring MVC</h1>
+<p class="subtitle">Cheat sheet · từ <a href="../lessons/0006-rest-api-dau-tien.html">Bài 6</a></p>
+
+<h2>Khung controller</h2>
+<pre><code>@RestController
+@RequestMapping("/products")
+public class ProductController {
+
+    private final ProductService productService;            // tiêm qua constructor
+
+    public ProductController(ProductService productService) { this.productService = productService; }
+
+    @GetMapping                                  // GET /products
+    public List&lt;Product&gt; findAll() { ... }
+
+    @GetMapping("/{id}")                         // GET /products/1
+    public Product findById(@PathVariable Long id) { ... }
+
+    @GetMapping("/search")                       // GET /products/search?maxPrice=100
+    public List&lt;Product&gt; search(@RequestParam(required = false) Long maxPrice) { ... }
+
+    @PostMapping                                 // POST /products + body JSON
+    @ResponseStatus(HttpStatus.CREATED)
+    public Product create(@RequestBody Product request) { ... }
+}</code></pre>
+
+<h2>Status code</h2>
+<table>
+  <tr><th>Mã</th><th>Khi nào</th><th>Cách trả</th></tr>
+  <tr><td>200 OK</td><td>Thành công (mặc định)</td><td>Trả về object bình thường</td></tr>
+  <tr><td>201 Created</td><td>Tạo mới thành công</td><td><code>@ResponseStatus(HttpStatus.CREATED)</code></td></tr>
+  <tr><td>204 No Content</td><td>Thành công, không có body (ví dụ khi xoá)</td><td><code>@ResponseStatus(HttpStatus.NO_CONTENT)</code></td></tr>
+  <tr><td>400 Bad Request</td><td>Request sai định dạng (ví dụ <code>/products/abc</code>)</td><td>Spring tự trả</td></tr>
+  <tr><td>404 Not Found</td><td>Không có tài nguyên</td><td><code>throw new ResponseStatusException(HttpStatus.NOT_FOUND)</code></td></tr>
+</table>
+
+<h2>Gọi thử bằng curl</h2>
+<pre><code>curl -i localhost:8080/products
+curl -i -X POST localhost:8080/products -H 'Content-Type: application/json' -d '{"name":"Áo","price":1}'</code></pre>
+
+<h2>Ghi nhớ</h2>
+<ul>
+  <li>Controller và service đều là bean <strong>singleton</strong>: mọi request dùng chung, nên state dùng chung phải an toàn đa luồng (<code>ConcurrentHashMap</code>, <code>AtomicLong</code>).</li>
+  <li>Object ↔ JSON do Jackson làm, và Spring Boot đã tự cấu hình sẵn Jackson.</li>
+  <li>Dữ liệu trong RAM sẽ mất khi khởi động lại app, nên cần database.</li>
+</ul>
+<p>Nguồn: <a href="https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann.html">Spring MVC: Annotated Controllers</a> · <a href="https://spring.io/guides/gs/rest-service">Spring Guide: REST Service</a></p>
+</body>
+</html>

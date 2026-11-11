@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 2 · == và equals</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../reference/lo-trinh.html">Lộ trình</a> · Bài 2 · <a href="0001-stack-heap-va-tham-chieu.html">← Bài 1</a> · <a href="0003-hop-dong-equals-hashcode.html">Bài 3 →</a> · <a href="../reference/thuat-ngu.html">Thuật ngữ</a></nav>
+
+<h1>So sánh mũi tên hay so sánh nội dung?</h1>
+<p class="subtitle"><code>==</code>, <code>equals()</code>, String pool và Integer cache: vì sao <code>"hi" == "hi"</code> lại ra <code>true</code>.</p>
+
+<div class="goal">
+  <strong>Sau bài này bạn sẽ</strong>
+  Đoán đúng kết quả của <code>==</code> và <code>equals()</code> với String, Integer và object tự viết, đồng thời giải thích được <em>vì sao</em> bằng sơ đồ stack/heap.
+</div>
+
+<details class="recall">
+  <summary>Ôn lại Bài 1 (trả lời trong đầu trước khi mở)</summary>
+  <p>(1) Biến <code>Person p</code> thực sự chứa gì? (2) Gọi <code>m(p)</code> thì thứ gì được copy?</p>
+  <p><em>Đáp án:</em> (1) Một giá trị tham chiếu (mũi tên) tới object trên heap, hoặc <code>null</code>. (2) Chính giá trị tham chiếu đó. Object không bao giờ bị copy.</p>
+</details>
+
+<h2>1. <code>==</code> so sánh <em>giá trị của biến</em></h2>
+<p>Bài 1 đã cho thấy biến reference chứa mũi tên. Vậy <code>==</code> giữa hai biến reference so sánh hai mũi tên, tức là hỏi: <strong>“hai biến này có chỉ vào cùng một object không?”</strong></p>
+<blockquote class="spec">
+  “At run time, the result of == is true if the operand values are both null or both refer to the same object or array; otherwise, the result is false.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.21.3">JLS §15.21.3</a></cite>
+</blockquote>
+<p>Với primitive, biến chứa chính con số nên <code>==</code> so sánh con số. Bản chất không đổi: <code>==</code> luôn so sánh <em>giá trị nằm trong biến</em>. Chỉ là với reference, giá trị đó là mũi tên.</p>
+
+<h2>2. <code>equals()</code> là một <em>method</em>, nên hành vi tuỳ class</h2>
+<p><code>equals</code> chỉ là một method thường của <code>Object</code>. Nếu class của bạn không override nó, bạn dùng bản mặc định, và bản mặc định chính là <code>==</code>:</p>
+<blockquote class="spec">
+  “The equals method for class Object implements the most discriminating possible equivalence relation on objects; that is, for any non-null reference values x and y, this method returns true if and only if x and y refer to the same object (x == y has the value true).”
+  <cite>— <a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html#equals(java.lang.Object)">Object.equals — Javadoc Java 21</a></cite>
+</blockquote>
+<p><code>String</code>, <code>Integer</code>, <code>List</code>… đều override <code>equals</code> để so sánh <strong>nội dung</strong>. Còn class <code>Person</code> tự viết mà không override thì <code>new Person("An").equals(new Person("An"))</code> trả về <code>false</code>, vì đó là hai object khác nhau.</p>
+
+<h2>3. String pool: vì sao <code>"hi" == "hi"</code></h2>
+<p>Hai literal giống nhau không tạo ra hai object. Spec đảm bảo chúng là <em>cùng một</em> instance:</p>
+<blockquote class="spec">
+  “a string literal always refers to the same instance of class String. This is because string literals - or, more generally, strings that are the values of constant expressions - are ‘interned’ so as to share unique instances, as if by execution of the method String.intern.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-3.html#jls-3.10.5">JLS §3.10.5</a></cite>
+</blockquote>
+
+<pre><code>String a = "hi";
+String b = "hi";
+String c = new String("hi");   // new LUÔN tạo object mới</code></pre>
+
+<figure>
+<svg viewBox="0 0 640 240" role="img" aria-labelledby="d3t">
+  <title id="d3t">a và b cùng trỏ tới một String "hi" đã intern trong pool; c trỏ tới một String object khác có cùng nội dung</title>
+  <defs><marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+  <rect class="region-stack" x="10" y="10" width="250" height="220" rx="8"/>
+  <text class="label stack-t" x="24" y="34">STACK</text>
+  <rect class="region-heap" x="320" y="10" width="310" height="220" rx="8"/>
+  <text class="label heap-t" x="334" y="34">HEAP</text>
+  <rect class="frame" x="30" y="50" width="210" height="160" rx="4"/>
+  <text class="muted-t" x="42" y="71">frame: main()</text>
+  <text x="42" y="105">a</text><text x="100" y="105">●</text>
+  <text x="42" y="145">b</text><text x="100" y="145">●</text>
+  <text x="42" y="185">c</text><text x="100" y="185">●</text>
+  <rect x="345" y="50" width="265" height="85" rx="4" fill="none" stroke="var(--heap)" stroke-dasharray="2 3"/>
+  <text class="muted-t" x="357" y="68">string pool (đã intern)</text>
+  <rect class="obj" x="420" y="80" width="140" height="40" rx="4"/>
+  <text x="440" y="105">String "hi"</text>
+  <rect class="obj" x="420" y="165" width="140" height="40" rx="4"/>
+  <text x="440" y="190">String "hi"</text>
+  <path class="arrow" d="M112,101 C250,101 330,95 418,96" marker-end="url(#ah3)"/>
+  <path class="arrow" d="M112,141 C250,141 330,115 418,108" marker-end="url(#ah3)"/>
+  <path class="arrow" d="M112,181 C250,181 330,185 418,185" marker-end="url(#ah3)"/>
+</svg>
+<figcaption>Hình 3. <code>a == b</code> là <code>true</code> vì cùng mũi tên. <code>a == c</code> là <code>false</code> vì khác object. <code>a.equals(c)</code> là <code>true</code> vì cùng nội dung.</figcaption>
+</figure>
+
+<h3>Biểu thức hằng được tính lúc compile</h3>
+<blockquote class="spec">
+  “Strings concatenated from constant expressions are computed at compile time and then treated as if they were literals. Strings computed by concatenation at run time are newly created and therefore distinct.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-3.html#jls-3.10.5">JLS §3.10.5</a></cite>
+</blockquote>
+<pre><code>String d = "h" + "i";          // hằng ⇒ compiler gộp thành "hi" ⇒ a == d là true
+String h = "h";
+String e = h + "i";            // h là biến thường ⇒ nối lúc runtime ⇒ object mới ⇒ a == e là false
+final String fh = "h";
+String f = fh + "i";           // fh là constant variable ⇒ lại là hằng ⇒ a == f là true</code></pre>
+<span class="sidenote">“Constant variable” là biến <code>final</code> kiểu primitive hoặc String, được khởi tạo bằng một biểu thức hằng (<a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.12.4">JLS §4.12.4</a>). Ở Bài 5 bạn sẽ <em>nhìn thấy</em> compiler gộp hằng ngay trong bytecode.</span>
+
+<h2>4. Integer cache: cái bẫy của autoboxing</h2>
+<p><code>Integer x = 127</code> là <em>boxing</em>: Java gọi ngầm <code>Integer.valueOf(127)</code>. Spec yêu cầu các giá trị nhỏ phải được dùng chung:</p>
+<blockquote class="spec">
+  “If the value p being boxed is the result of evaluating a constant expression of type […] int […] and the result is […] an integer in the range -128 to 127 inclusive, then let a and b be the results of any two boxing conversions of p. It is always the case that a == b.”
+  <cite>— <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-5.html#jls-5.1.7">JLS §5.1.7</a></cite>
+</blockquote>
+<pre><code>Integer x = 127, y = 127;   x == y   // true  (cùng object trong cache)
+Integer m = 128, n = 128;   m == n   // false (mặc định: hai object khác nhau)
+m.equals(n)                          // true</code></pre>
+<span class="sidenote">Ngoài khoảng −128..127 thì kết quả <em>không được đảm bảo</em>: cận trên của cache có thể nới rộng bằng <code>-XX:AutoBoxCacheMax</code> (<a href="https://github.com/openjdk/jdk21u/blob/master/src/java.base/share/classes/java/lang/Integer.java">Integer.java</a>). Vì thế code đúng không bao giờ được dựa vào <code>==</code> với Integer.</span>
+<p>Lỗi này hay gặp ở code thật: <code>if (order.getId() == other.getId())</code> với kiểu <code>Long</code> chạy đúng khi test bằng id nhỏ, rồi sai ở production khi id vượt quá 127.</p>
+
+<div class="box key">
+<p><strong>Quy tắc dùng hằng ngày</strong></p>
+<ul>
+  <li>Dùng <code>==</code> cho primitive, <code>enum</code>, so sánh với <code>null</code>, hoặc khi bạn <em>thật sự</em> muốn hỏi “có cùng object không”.</li>
+  <li>Dùng <code>equals()</code> cho mọi trường hợp so sánh nội dung object, kể cả String và các wrapper như Integer, Long.</li>
+  <li>Nếu biến có thể là <code>null</code>, dùng <code>Objects.equals(a, b)</code> để tránh <code>NullPointerException</code>.</li>
+</ul>
+</div>
+
+<h2>5. Luyện tập</h2>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q1 (ôn Bài 1). Sau khi chạy đoạn sau, <code>a</code> bằng gì?</p>
+<pre><code>static void f(String s) { s = "B"; }
+String a = "A"; f(a);</code></pre>
+  <div class="opts"><button>"A"</button><button>"B"</button></div>
+  <div class="explain">Gán lại tham số chỉ bẻ mũi tên trong frame của <code>f</code>. Hơn nữa String là immutable, nên không có cách nào sửa nội dung object "A".</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q2. <code>new String("hi") == "hi"</code></p>
+  <div class="opts"><button>true</button><button>false</button></div>
+  <div class="explain"><code>new</code> luôn tạo object mới trên heap, khác với instance đã intern của literal.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q3. <code>("h" + "i") == "hi"</code></p>
+  <div class="opts"><button>false</button><button>true</button></div>
+  <div class="explain">Cả hai vế đều là biểu thức hằng, nên compiler gộp thành literal "hi" và trỏ vào cùng instance đã intern.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q4. <code>Integer m = 128, n = 128;</code> thì <code>m == n</code> ở cấu hình JVM mặc định là?</p>
+  <div class="opts"><button>false</button><button>true</button></div>
+  <div class="explain">128 nằm ngoài khoảng cache bắt buộc (−128..127), nên mỗi lần boxing tạo một object mới.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <p class="q">Q5. <code>String h = "h";</code> thì <code>(h + "i") == "hi"</code> là?</p>
+  <div class="opts"><button>false</button><button>true</button></div>
+  <div class="explain"><code>h</code> không phải <code>final</code> nên không phải constant variable. Phép nối chạy lúc runtime và tạo String mới.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q6. <code>Person</code> không override <code>equals</code>. <code>new Person("An").equals(new Person("An"))</code> là?</p>
+  <div class="opts"><button>true</button><button>false</button></div>
+  <div class="explain">Bản <code>equals</code> mặc định của <code>Object</code> chính là <code>==</code>, và đây là hai object khác nhau.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <p class="q">Q7. <code>==</code> giữa hai biến reference so sánh cái gì?</p>
+  <div class="opts"><button>nội dung của hai object</button><button>giá trị tham chiếu hai biến</button><button>hashCode của hai object</button></div>
+  <div class="explain">JLS §15.21.3: <code>==</code> ra true khi cả hai cùng refer tới một object. Nó không gọi <code>equals</code> hay <code>hashCode</code>.</div>
+</div>
+
+<div class="quiz-score"></div>
+
+<h2>6. Chạy thử</h2>
+<p>Đoán kết quả 11 dòng trước, rồi chạy: <code>java lessons/code/L0002Equality.java</code> (<a href="code/L0002Equality.java">mở file</a>).</p>
+<p>Thử thêm: chạy lại với <code>java -XX:AutoBoxCacheMax=1000 lessons/code/L0002Equality.java</code> và xem dòng 9 có đổi không.</p>
+
+<hr>
+<div class="box key"><p><strong>Nguồn chính nên đọc:</strong> <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-3.html#jls-3.10.5">JLS §3.10.5 String Literals</a>. Cuối mục có sẵn một ví dụ với 6 phép so sánh <code>==</code>; hãy tự đoán trước khi đọc đáp án.</p></div>
+<p class="next"><strong>Cheat sheet:</strong> <a href="../reference/equals-hashcode-hashmap.html">equals · hashCode · HashMap</a><br><strong>Bài tiếp:</strong> <a href="0003-hop-dong-equals-hashcode.html">Bài 3: hợp đồng equals/hashCode</a>, và vì sao chỉ override <code>equals</code> sẽ làm HashSet “mất” phần tử.</p>
+<p class="ask">Có chỗ chưa rõ, ví dụ “intern() thực ra làm gì?” hay “String pool nằm ở đâu?”, cứ hỏi mình trong terminal. Làm xong quiz thì báo mình kết quả nhé.</p>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

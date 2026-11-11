@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scope và vòng đời bean</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Scope &amp; vòng đời của bean</h1>
+<p class="subtitle">Bài 4 · Spring tạo bao nhiêu object, lúc nào tạo, và lúc nào huỷ</p>
+<div class="meta"><span>~40 phút</span><span>Cần: <a href="0003-configuration-va-bean.html">Bài 3</a></span><span>Lab: <code>./lab</code></span></div>
+
+<p>Đây là bài quan trọng nhất trong 6 bài đầu cho công việc thật. Rất nhiều bug trên production đến từ việc không biết rằng <strong>mỗi bean mặc định chỉ có một object, và object đó được mọi người dùng chung</strong>.</p>
+
+<h2>1 · Scope: một object hay nhiều object?</h2>
+<table>
+  <tr><th>Scope</th><th>Số object</th><th>Ví dụ đời thường</th></tr>
+  <tr><td><code>singleton</code> (mặc định)</td><td><strong>Một</strong> object cho cả container</td><td>Cái máy in chung của văn phòng</td></tr>
+  <tr><td><code>prototype</code></td><td>Mỗi lần xin bean là một object <strong>mới</strong></td><td>Tờ giấy: ai cần thì lấy một tờ mới</td></tr>
+</table>
+<p>Ngoài ra còn các scope cho web như <code>request</code> và <code>session</code>. Bài này chưa dùng tới chúng. <a class="cite" href="https://docs.spring.io/spring-framework/reference/core/beans/factory-scopes.html">[docs]</a></p>
+
+<div class="callout">
+  <strong>Hệ quả quan trọng</strong>
+  Bean singleton được mọi nơi dùng chung. Trong web app, mọi request (có thể hàng nghìn request cùng lúc) đều dùng chung <em>cùng một</em> object <code>OrderService</code>. Vì vậy <strong>không được lưu dữ liệu riêng của từng người dùng vào field của bean singleton</strong>. Bài 6 sẽ quay lại điểm này.
+</div>
+
+<h2>2 · Vòng đời: tạo → sẵn sàng → huỷ</h2>
+<ol class="flow">
+  <li><strong>Constructor</strong>: Spring tạo object và tiêm dependency qua constructor.</li>
+  <li><strong><code>@PostConstruct</code></strong>: được gọi sau khi dependency đã tiêm xong. Đây là chỗ để "khởi động": mở kết nối, nạp cache…</li>
+  <li>Bean được dùng trong suốt thời gian app chạy.</li>
+  <li><strong><code>@PreDestroy</code></strong>: được gọi khi container đóng (lúc app tắt). Đây là chỗ để "dọn dẹp": đóng kết nối, ghi file…</li>
+</ol>
+<p>Hai annotation này nằm ở package <code>jakarta.annotation</code>. <a class="cite" href="https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/postconstruct-and-predestroy-annotations.html">[docs]</a></p>
+
+<div class="callout">
+  <strong>Ngoại lệ với prototype</strong>
+  Với bean prototype, Spring tạo object, giao cho bạn, rồi <em>không theo dõi nó nữa</em>. Vì vậy <code>@PreDestroy</code> của bean prototype <strong>không bao giờ được gọi</strong>, và việc dọn dẹp là trách nhiệm của người dùng bean. <a class="cite" href="https://docs.spring.io/spring-framework/reference/core/beans/factory-scopes.html#beans-factory-scopes-prototype">[docs]</a>
+</div>
+
+<hr>
+
+<h2>3 · Thực hành</h2>
+<div class="lab">
+<h3>Lab 4 · ~25 phút</h3>
+<ol>
+  <li><strong>Theo dõi vòng đời.</strong> Sửa <code>ConsoleEmailSender</code>: thêm constructor và 2 method vòng đời:
+<pre><code>package dev.lab;
+
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import org.springframework.context.annotation.Primary;
+import org.springframework.stereotype.Component;
+
+@Primary
+@Component
+public class ConsoleEmailSender implements EmailSender {
+
+    public ConsoleEmailSender() {
+        System.out.println("[1] Constructor ConsoleEmailSender");
+    }
+
+    @PostConstruct
+    public void connect() {
+        System.out.println("[2] @PostConstruct: kết nối tới mail server");
+    }
+
+    @PreDestroy
+    public void disconnect() {
+        System.out.println("[3] @PreDestroy: đóng kết nối mail server");
+    }
+
+    @Override
+    public void send(String to, String message) {
+        System.out.println("Gửi email tới " + to + ": " + message);
+    }
+}</code></pre></li>
+
+  <li><strong>Giỏ hàng.</strong> Tạo <code>ShoppingCart.java</code> với scope prototype:
+<pre><code>package dev.lab;
+
+import java.util.ArrayList;
+import java.util.List;
+import jakarta.annotation.PreDestroy;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
+
+@Component
+<span class="hl">@Scope("prototype")</span>
+public class ShoppingCart {
+
+    private final List&lt;String&gt; items = new ArrayList&lt;&gt;();
+
+    public void add(String item) {
+        items.add(item);
+    }
+
+    public List&lt;String&gt; getItems() {
+        return items;
+    }
+
+    @PreDestroy
+    public void cleanup() {
+        System.out.println("ShoppingCart @PreDestroy");
+    }
+}</code></pre></li>
+
+  <li><strong>Thí nghiệm.</strong> Thay phần thân <code>main</code> (từ sau dòng <code>SpringApplication.run</code>) bằng:
+<pre><code>OrderService a = context.getBean(OrderService.class);
+OrderService b = context.getBean(OrderService.class);
+System.out.println("OrderService a == b ? " + (a == b));
+
+ShoppingCart cartOfAn = context.getBean(ShoppingCart.class);
+ShoppingCart cartOfBinh = context.getBean(ShoppingCart.class);
+cartOfAn.add("Áo thun");
+System.out.println("ShoppingCart cùng một object ? " + (cartOfAn == cartOfBinh));
+System.out.println("Giỏ của An: " + cartOfAn.getItems() + ", giỏ của Bình: " + cartOfBinh.getItems());</code></pre>
+  <strong>Đoán trước 4 điều:</strong> thứ tự in [1] [2] [3]; giá trị <code>a == b</code>; giỏ của Bình có gì; và dòng "ShoppingCart @PreDestroy" có được in không. Sau đó mới chạy.</li>
+
+  <li><strong>Gây bug có chủ đích.</strong> Xoá dòng <code>@Scope("prototype")</code> để <code>ShoppingCart</code> thành singleton. Chạy lại và xem giỏ của Bình.</li>
+</ol>
+
+<details>
+  <summary>Kết quả mong đợi</summary>
+<pre><code># Bước 3: ShoppingCart là prototype
+[1] Constructor ConsoleEmailSender
+[2] @PostConstruct: kết nối tới mail server
+OrderService a == b ? <span class="hl">true</span>
+ShoppingCart cùng một object ? false
+Giỏ của An: [Áo thun], giỏ của Bình: []
+[3] @PreDestroy: đóng kết nối mail server
+                     <span class="hl">← không có "ShoppingCart @PreDestroy"</span>
+
+# Bước 4: ShoppingCart là singleton
+ShoppingCart cùng một object ? true
+Giỏ của An: [Áo thun], giỏ của Bình: <span class="bad-hl">[Áo thun]</span>   ← Bình thấy đồ của An!
+ShoppingCart @PreDestroy</code></pre>
+  <ul>
+    <li>[1] và [2] được in <em>trước</em> mọi dòng khác. Lý do: bean singleton được tạo ngay lúc khởi động, chứ không phải lúc bạn gọi <code>getBean</code>.</li>
+    <li>[3] được in sau cùng, lúc app tắt và container đóng lại.</li>
+    <li>Ở bước 4, bạn vừa tự tay tạo ra một bug kinh điển: <strong>dữ liệu của người này lọt sang người khác</strong>, vì cả hai đang dùng chung một object singleton.</li>
+  </ul>
+</details>
+
+<p><strong>Trạng thái để sang bài 5:</strong> trả <code>@Scope("prototype")</code> lại cho <code>ShoppingCart</code>. Các dòng in vòng đời giữ hay xoá đều được.</p>
+</div>
+
+<hr>
+
+<h2>4 · Kiểm tra trí nhớ</h2>
+<div class="quiz" data-quiz="q4"></div>
+<script type="application/json" id="q4">
+[
+  {
+    "q": "Gọi <code>context.getBean(OrderService.class)</code> hai lần (scope mặc định). <code>a == b</code> cho kết quả gì?",
+    "options": [
+      "false, vì mỗi lần getBean Spring lại tạo object mới",
+      "true, vì mặc định mỗi container chỉ giữ một object",
+      "Tuỳ lần chạy, vì Spring tạo bean trên nhiều luồng"
+    ],
+    "answer": 1,
+    "why": "Scope mặc định là singleton: mỗi bean definition chỉ có một object trong container."
+  },
+  {
+    "q": "<code>ShoppingCart</code> bị để là singleton. An thêm \"Áo thun\" vào giỏ. Giỏ của Bình có gì?",
+    "options": [
+      "Trống, vì mỗi người gọi getBean sẽ có giỏ riêng",
+      "Lỗi, vì Spring cấm hai biến cùng trỏ một bean",
+      "Có Áo thun, vì hai người dùng chung một object"
+    ],
+    "answer": 2,
+    "why": "Hai biến cùng trỏ vào một object. Dữ liệu riêng của từng người không được nằm trong field của bean singleton."
+  },
+  {
+    "q": "Với một bean singleton, các method được gọi theo thứ tự nào?",
+    "options": [
+      "Constructor, rồi @PostConstruct, rồi @PreDestroy khi app dừng",
+      "@PostConstruct, rồi constructor, rồi @PreDestroy khi app dừng",
+      "Constructor, rồi @PreDestroy, rồi @PostConstruct khi app dừng"
+    ],
+    "answer": 0,
+    "why": "Constructor tạo object và nhận dependency, <code>@PostConstruct</code> chạy khi mọi thứ đã sẵn sàng, còn <code>@PreDestroy</code> chạy lúc container đóng."
+  },
+  {
+    "q": "Vì sao <code>@PreDestroy</code> của bean prototype <code>ShoppingCart</code> không được in ra?",
+    "options": [
+      "App dừng quá nhanh nên Spring chưa kịp gọi nó",
+      "Spring giao object xong thì không theo dõi nó nữa",
+      "@PreDestroy chỉ chạy khi class có thêm cả annotation @Component"
+    ],
+    "answer": 1,
+    "why": "Docs: với prototype, container không quản lý trọn vòng đời, nên không gọi destruction callback. Bạn phải tự dọn dẹp."
+  }
+]
+</script>
+
+<h2>5 · Thử thách</h2>
+<ol>
+  <li>Một đồng nghiệp viết <code>@Service class CheckoutService { private String currentUserEmail; ... }</code> và gán email người dùng vào field đó ở mỗi request. Bug gì sẽ xảy ra khi có 2 người thanh toán cùng lúc? Bạn sẽ sửa thế nào?</li>
+  <li><em>Ôn bài 3:</em> khi nào dùng <code>@Bean</code> thay cho <code>@Component</code>?</li>
+</ol>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><strong>Nguồn chính:</strong> <a href="https://docs.spring.io/spring-framework/reference/core/beans/factory-scopes.html">Spring Framework Reference: Bean Scopes</a>. Đọc mục Singleton và Prototype, khoảng 7 phút.</p>
+<p>Tra nhanh: <a href="../reference/ioc-di.html">Cheat sheet: IoC, DI &amp; Bean</a>.</p>
+<p class="ask">Có gì chưa rõ thì cứ hỏi teacher (Claude). Ví dụ: "Nếu tiêm bean prototype vào một bean singleton thì mỗi lần dùng có ra object mới không?" Đây là một câu hỏi phỏng vấn rất hay.</p>
+
+<div class="footer-nav no-print">
+  <a href="0003-configuration-va-bean.html">← Bài 3: @Configuration &amp; @Bean</a>
+  <a href="0005-cau-hinh-properties-profile.html">Bài 5: Cấu hình &amp; profile →</a>
+</div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
