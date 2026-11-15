@@ -1,0 +1,35 @@
+# A.13. Property RSocket (RSocket Properties)
+
+> Nguồn: <https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#appendix.application-properties.rsocket>
+
+| Tên | Mô tả | Giá trị mặc định |
+|---|---|---|
+| [`spring.rsocket.server.address`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.address) | Địa chỉ mạng mà server nên bind tới. |  |
+| [`spring.rsocket.server.fragment-size`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.fragment-size) | Đơn vị truyền tải tối đa (MTU). Các frame lớn hơn giá trị được chỉ định sẽ bị phân mảnh. |  |
+| [`spring.rsocket.server.mapping-path`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.mapping-path) | Đường dẫn mà RSocket xử lý request dưới đó (chỉ hoạt động với websocket transport). |  |
+| [`spring.rsocket.server.port`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.port) | Port của server. |  |
+| [`spring.rsocket.server.spec.compress`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.spec.compress) | Phần mở rộng nén websocket có được bật hay không. | `false` |
+| [`spring.rsocket.server.spec.handle-ping`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.spec.handle-ping) | Có proxy các frame ping websocket hay phản hồi chúng. | `false` |
+| [`spring.rsocket.server.spec.max-frame-payload-length`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.spec.max-frame-payload-length) | Độ dài payload tối đa cho phép của frame. | `65536B` |
+| [`spring.rsocket.server.spec.protocols`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.spec.protocols) | Các sub-protocol dùng trong chữ ký handshake websocket. |  |
+| [`spring.rsocket.server.ssl.bundle`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.bundle) | Tên của một SSL bundle đã cấu hình. |  |
+| [`spring.rsocket.server.ssl.certificate`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.certificate) | Đường dẫn tới một file SSL certificate mã hóa PEM. |  |
+| [`spring.rsocket.server.ssl.certificate-private-key`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.certificate-private-key) | Đường dẫn tới một file private key mã hóa PEM cho SSL certificate. |  |
+| [`spring.rsocket.server.ssl.ciphers`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.ciphers) | Các SSL cipher được hỗ trợ. |  |
+| [`spring.rsocket.server.ssl.client-auth`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.client-auth) | Chế độ xác thực client. Yêu cầu một trust store. |  |
+| [`spring.rsocket.server.ssl.enabled`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.enabled) | Có bật hỗ trợ SSL hay không. | `true` |
+| [`spring.rsocket.server.ssl.enabled-protocols`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.enabled-protocols) | Các giao thức SSL được bật. |  |
+| [`spring.rsocket.server.ssl.key-alias`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.key-alias) | Alias xác định key trong key store. |  |
+| [`spring.rsocket.server.ssl.key-password`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.key-password) | Mật khẩu dùng để truy cập key trong key store. |  |
+| [`spring.rsocket.server.ssl.key-store`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.key-store) | Đường dẫn tới key store chứa SSL certificate (thường là một file jks). |  |
+| [`spring.rsocket.server.ssl.key-store-password`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.key-store-password) | Mật khẩu dùng để truy cập key store. |  |
+| [`spring.rsocket.server.ssl.key-store-provider`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.key-store-provider) | Provider cho key store. |  |
+| [`spring.rsocket.server.ssl.key-store-type`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.key-store-type) | Kiểu của key store. |  |
+| [`spring.rsocket.server.ssl.protocol`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.protocol) | Giao thức SSL cần dùng. | `TLS` |
+| [`spring.rsocket.server.ssl.trust-certificate`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.trust-certificate) | Đường dẫn tới một file certificate authority SSL mã hóa PEM. |  |
+| [`spring.rsocket.server.ssl.trust-certificate-private-key`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.trust-certificate-private-key) | Đường dẫn tới một file private key mã hóa PEM cho certificate authority SSL. |  |
+| [`spring.rsocket.server.ssl.trust-store`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.trust-store) | Trust store chứa các SSL certificate. |  |
+| [`spring.rsocket.server.ssl.trust-store-password`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.trust-store-password) | Mật khẩu dùng để truy cập trust store. |  |
+| [`spring.rsocket.server.ssl.trust-store-provider`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.trust-store-provider) | Provider cho trust store. |  |
+| [`spring.rsocket.server.ssl.trust-store-type`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.ssl.trust-store-type) | Kiểu của trust store. |  |
+| [`spring.rsocket.server.transport`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#application-properties.rsocket.spring.rsocket.server.transport) | Giao thức transport của RSocket. | `tcp` |

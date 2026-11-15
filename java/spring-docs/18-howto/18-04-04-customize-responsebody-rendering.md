@@ -1,0 +1,9 @@
+# 18.4.4. Tùy chỉnh việc render @ResponseBody (Customize the @ResponseBody Rendering)
+
+> Nguồn: <https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#howto.spring-mvc.customize-responsebody-rendering>
+
+Spring dùng `HttpMessageConverters` để render `@ResponseBody` (hoặc các response từ `@RestController`). Bạn có thể đóng góp thêm các converter bằng cách thêm các bean có kiểu phù hợp vào context Spring Boot. Nếu một bean bạn thêm có kiểu mà dù sao cũng đã được bao gồm theo mặc định (chẳng hạn như `MappingJackson2HttpMessageConverter` cho chuyển đổi JSON), nó sẽ thay thế giá trị mặc định. Một bean tiện ích kiểu `HttpMessageConverters` được cung cấp và luôn có sẵn nếu bạn dùng cấu hình MVC mặc định. Nó có một số phương thức hữu ích để truy cập các message converter mặc định và các message converter được người dùng bổ sung (Ví dụ, nó có thể hữu ích nếu bạn muốn inject chúng thủ công vào một `RestTemplate` tùy chỉnh).
+
+Như trong cách dùng MVC thông thường, mọi bean `WebMvcConfigurer` mà bạn cung cấp cũng có thể đóng góp converter bằng cách override phương thức `configureMessageConverters`. Tuy nhiên, không giống MVC thông thường, bạn chỉ có thể cung cấp thêm các converter mà bạn cần (vì Spring Boot dùng cùng cơ chế đó để đóng góp các converter mặc định của nó). Cuối cùng, nếu bạn không dùng cấu hình MVC mặc định của Spring Boot bằng cách cung cấp cấu hình `@EnableWebMvc` của riêng mình, bạn có thể kiểm soát hoàn toàn và làm mọi thứ thủ công bằng cách dùng `getMessageConverters` từ `WebMvcConfigurationSupport`.
+
+Xem mã nguồn [`WebMvcAutoConfiguration`](https://github.com/spring-projects/spring-boot/tree/v3.2.5/spring-boot-project/spring-boot-autoconfigure/src/main/java/org/springframework/boot/autoconfigure/web/servlet/WebMvcAutoConfiguration.java) để biết thêm chi tiết.

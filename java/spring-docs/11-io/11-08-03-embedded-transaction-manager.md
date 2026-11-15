@@ -1,0 +1,5 @@
+# 11.8.3. Hỗ trợ transaction manager nhúng (Supporting an Embedded Transaction Manager)
+
+> Nguồn: <https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#io.jta.supporting-embedded-transaction-manager>
+
+Các interface [`XAConnectionFactoryWrapper`](https://github.com/spring-projects/spring-boot/tree/v3.2.5/spring-boot-project/spring-boot/src/main/java/org/springframework/boot/jms/XAConnectionFactoryWrapper.java) và [`XADataSourceWrapper`](https://github.com/spring-projects/spring-boot/tree/v3.2.5/spring-boot-project/spring-boot/src/main/java/org/springframework/boot/jdbc/XADataSourceWrapper.java) có thể được dùng để hỗ trợ các transaction manager nhúng. Các interface này chịu trách nhiệm bọc các bean `XAConnectionFactory` và `XADataSource` và expose chúng dưới dạng các bean `ConnectionFactory` và `DataSource` thông thường, những bean này tham gia một cách trong suốt vào giao dịch phân tán. Auto-configuration DataSource và JMS dùng các biến thể JTA, với điều kiện bạn có một bean `JtaTransactionManager` và các bean XA wrapper phù hợp được đăng ký trong `ApplicationContext`.

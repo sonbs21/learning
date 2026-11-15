@@ -1,0 +1,5 @@
+# 11.8.1. Sử dụng transaction manager do Jakarta EE quản lý (Using a Jakarta EE Managed Transaction Manager)
+
+> Nguồn: <https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#io.jta.jakartaee>
+
+Nếu bạn đóng gói ứng dụng Spring Boot dưới dạng file `war` hoặc `ear` và triển khai nó lên một application server Jakarta EE, bạn có thể dùng transaction manager có sẵn của application server. Spring Boot cố gắng tự động cấu hình một transaction manager bằng cách xem các vị trí JNDI phổ biến (`java:comp/UserTransaction`, `java:comp/TransactionManager`, v.v.). Khi dùng một transaction service do application server cung cấp, bạn thường cũng muốn đảm bảo tất cả các tài nguyên được server quản lý và expose qua JNDI. Spring Boot cố gắng tự động cấu hình JMS bằng cách tìm một `ConnectionFactory` tại đường dẫn JNDI (`java:/JmsXA` hoặc `java:/XAConnectionFactory`), và bạn có thể dùng [property `spring.datasource.jndi-name`](https://docs.spring.io/spring-boot/docs/3.2.5/reference/htmlsingle/#data.sql.datasource.jndi) để cấu hình `DataSource`.
