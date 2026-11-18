@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Từ khoá final</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1><code>final</code> khoá cái gì, và không khoá cái gì?</h1>
+<p class="subtitle">Bài 15 · <code>final</code> cho biến, field, method, class. Hiểu lầm phổ biến nhất: "final List thì không sửa được"</p>
+<div class="meta"><span>~30 phút</span><span>Cần biết: <a href="0004-string-pool.html">Bài 4</a> (tham chiếu, String immutable)</span><span>Thư mục thực hành: <code>lab/l0015</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Biết chính xác <code>final</code> khoá cái gì ở 4 chỗ: biến, field, method và class.</li>
+  <li>Không còn nhầm "biến <code>final</code>" với "object không sửa được".</li>
+  <li>Viết được một class <strong>thật sự</strong> bất biến (immutable), và hiểu vì sao điều đó quan trọng với thread.</li>
+</ul>
+
+<h2>1 · Ôn bài 4 (trả lời trong đầu trước)</h2>
+<div class="callout">Biến kiểu object (ví dụ <code>List&lt;String&gt; ds</code>) chứa gì?
+<details><summary>Kiểm tra</summary>Nó chứa một <strong>tham chiếu</strong>, tức "tờ giấy ghi vị trí" của object. Object thật (tấm bảng) nằm trên heap. Giữ hình ảnh này trong đầu, vì cả bài hôm nay dựa trên nó.</details></div>
+
+<h2>2 · <code>final</code> trên biến: khoá tờ giấy, không khoá tấm bảng</h2>
+
+<div class="analogy">
+<p>Bạn có một <strong>tờ giấy</strong> ghi "giỏ hàng ở ô số 7". <code>final</code> nghĩa là tờ giấy này được <strong>ép plastic</strong>: không ai sửa được dòng chữ "ô số 7" thành "ô số 9".</p>
+<p>Nhưng cái <strong>giỏ hàng</strong> ở ô số 7 thì vẫn là một giỏ hàng bình thường. Ai cũng có thể bỏ thêm đồ vào, hoặc lấy đồ ra.</p>
+</div>
+
+<p>Mở <code>lab/l0015/FinalList.java</code>:</p>
+<pre><code>final List&lt;String&gt; gioHang = new ArrayList&lt;&gt;();
+gioHang.add("sách");          // sửa NỘI DUNG object → được phép
+gioHang.add("bút");
+gioHang.remove("sách");
+System.out.println("gioHang = " + gioHang);
+// gioHang = new ArrayList&lt;&gt;(); // gán biến sang object khác → lỗi biên dịch</code></pre>
+<p><strong>Đoán trước:</strong> có biên dịch được không? Nếu được thì in ra gì?</p>
+<pre><code>cd lab/l0015
+javac FinalList.java &amp;&amp; java FinalList</code></pre>
+<div class="expect"><pre><code>gioHang = [bút]</code></pre></div>
+<p><code>add</code> và <code>remove</code> chạy thoải mái. Giờ thử <strong>gán lại</strong> biến <code>final</code>. File <code>loi/ReassignFinal.java</code> cố tình làm việc này:</p>
+<pre><code>final int soLuong = 5;
+soLuong = 6;
+
+final List&lt;String&gt; gioHang = new ArrayList&lt;&gt;();
+gioHang = new ArrayList&lt;&gt;();</code></pre>
+<pre><code>javac loi/ReassignFinal.java</code></pre>
+<div class="expect"><pre><code>loi/ReassignFinal.java:7: error: cannot assign a value to final variable soLuong
+        soLuong = 6;
+        ^
+loi/ReassignFinal.java:10: error: cannot assign a value to final variable gioHang
+        gioHang = new ArrayList&lt;&gt;();
+        ^
+2 errors</code></pre></div>
+<p>JLS nói đúng điều này: <em>"If a final variable holds a reference to an object, then the state of the object may be changed by operations on the object, but the variable will always refer to the same object."</em><a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.12.4">[JLS §4.12.4]</a></p>
+
+<div class="remember">
+<code>final</code> trên biến = <strong>không được gán lại</strong> biến đó. Với biến primitive (<code>int</code>...) thì giá trị cố định luôn. Với biến object thì chỉ <strong>tham chiếu</strong> cố định, còn object vẫn sửa được như thường.<br>
+<code>final</code> ≠ immutable (bất biến).
+</div>
+
+<h2>3 · Lambda và "effectively final"</h2>
+<p>Có một chỗ bạn sẽ đụng phải <code>final</code> mà không hề viết chữ <code>final</code>. File <code>loi/LambdaCount.java</code>:</p>
+<pre><code>int dem = 0;
+List.of("a", "b", "c").forEach(s -&gt; dem++);</code></pre>
+<pre><code>javac loi/LambdaCount.java</code></pre>
+<div class="expect"><pre><code>loi/LambdaCount.java:6: error: local variables referenced from a lambda expression must be final or effectively final
+        List.of("a", "b", "c").forEach(s -&gt; dem++);
+                                            ^</code></pre></div>
+<p>Biến cục bộ dùng bên trong lambda phải là <code>final</code>, hoặc <span class="term">effectively final</span>: không có chữ <code>final</code> nhưng không bao giờ bị gán lại. Lý do: biến cục bộ nằm trên stack của method (bài 2), còn lambda có thể chạy sau, ở một thread khác (bài 14). Java chỉ cho lambda <strong>chép giá trị</strong> của biến, nên giá trị đó không được phép thay đổi.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.27.2">[JLS §15.27.2]</a> Muốn đếm trong lambda thì dùng <code>AtomicInteger</code> (bài 10), hoặc tốt hơn là <code>count()</code> của Stream.</p>
+
+<h2>4 · <code>final</code> trên method và class: cấm ghi đè, cấm kế thừa</h2>
+<table>
+  <tr><th>Đặt <code>final</code> ở</th><th>Ý nghĩa</th><th>Thông báo lỗi thật</th></tr>
+  <tr><td>Method</td><td>Class con <strong>không được override</strong> method này</td><td><code>tinhLai() in TaiKhoanVip cannot override tinhLai() in TaiKhoan<br>&nbsp;&nbsp;overridden method is final</code></td></tr>
+  <tr><td>Class</td><td><strong>Không ai được kế thừa</strong> class này</td><td><code>cannot inherit from final String</code></td></tr>
+</table>
+<pre><code>javac loi/OverrideFinal.java
+javac loi/ExtendString.java</code></pre>
+<p><code>String</code> là một class <code>final</code>.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.1.1.2">[JLS §8.1.1.2]</a> Nhớ lại bài 4: String được nhiều biến dùng chung trong String pool nên phải bất biến. Nếu ai cũng kế thừa được <code>String</code>, người ta có thể viết một class con "trông như String" nhưng sửa được nội dung, và phá vỡ mọi đảm bảo đó.</p>
+<p><strong>Nối với bài 12:</strong> Spring tạo proxy bằng CGLIB, tức là sinh ra một class con rồi override method. Method <code>final</code> (hay class <code>final</code>) thì không override được, nên <code>@Transactional</code> đặt trên đó sẽ <strong>không có tác dụng</strong>.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.4.3.3">[JLS §8.4.3.3]</a></p>
+
+<h2>5 · Bẫy thật: class "trông như bất biến" nhưng vẫn bị sửa</h2>
+<p>Một class có field <code>private final</code> và không có setter thì trông rất an toàn. Mở <code>DonHangHo.java</code>:</p>
+<pre><code>static class DonHang {
+    private final List&lt;String&gt; monHang;
+    DonHang(List&lt;String&gt; monHang) { this.monHang = monHang; }
+    List&lt;String&gt; getMonHang() { return monHang; }
+}
+
+List&lt;String&gt; ds = new ArrayList&lt;&gt;(List.of("sách", "bút"));
+DonHang don = new DonHang(ds);
+ds.add("laptop");               // sửa list GỐC bên ngoài
+don.getMonHang().clear();       // sửa qua getter</code></pre>
+<p><strong>Đoán trước:</strong> sau hai dòng cuối, đơn hàng còn những gì?</p>
+<pre><code>javac DonHangHo.java &amp;&amp; java DonHangHo</code></pre>
+<div class="expect"><pre><code>1. Đơn hàng lúc tạo: [sách, bút]
+2. Sau khi sửa ds:   [sách, bút, <span class="bad-hl">laptop</span>]
+3. Sau getter.clear: <span class="bad-hl">[]</span></code></pre></div>
+<p>Đơn hàng bị sửa từ bên ngoài, dù field là <code>private final</code>. Lý do: <code>final</code> chỉ khoá tờ giấy <code>monHang</code>. Mà tờ giấy đó trỏ tới <strong>đúng cái list</strong> người gọi đang cầm (chung tấm bảng), và getter lại đưa tờ giấy ra ngoài cho bất kỳ ai.</p>
+
+<h3>Cách sửa: chép ra một bản không sửa được</h3>
+<p><code>DonHangKin.java</code> chỉ đổi đúng một dòng trong constructor:</p>
+<pre><code>DonHang(List&lt;String&gt; monHang) { this.monHang = <span class="hl">List.copyOf(monHang)</span>; }</code></pre>
+<pre><code>javac DonHangKin.java &amp;&amp; java DonHangKin</code></pre>
+<div class="expect"><pre><code>1. Sau khi sửa ds:   [sách, bút]
+2. getter.clear() bị chặn: java.lang.UnsupportedOperationException</code></pre></div>
+<p><code>List.copyOf</code> tạo ra một list <strong>mới</strong> (tấm bảng riêng) và <strong>không sửa được</strong> (tấm bảng ép plastic).<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/List.html#copyOf(java.util.Collection)">[List.copyOf]</a> Sửa list gốc không còn ảnh hưởng gì, còn sửa qua getter thì bị chặn ngay.</p>
+
+<div class="remember">
+Công thức một class <strong>bất biến thật sự</strong>:<a class="cite" href="https://docs.oracle.com/javase/tutorial/essential/concurrency/imstrat.html">[Oracle: Immutable Objects]</a>
+<ol style="margin:.3rem 0 0">
+  <li>Mọi field là <code>private final</code>, không có setter.</li>
+  <li>Field nào trỏ tới object sửa được (List, Map, mảng, Date...) thì <strong>chép ra bản riêng</strong> khi nhận vào (<code>List.copyOf</code>), và không đưa bản gốc ra ngoài.</li>
+  <li>Class <code>final</code> (hoặc dùng <code>record</code>) để không ai kế thừa rồi phá luật.</li>
+</ol>
+</div>
+
+<h2>6 · Vì sao điều này quan trọng với thread?</h2>
+<p>Nhớ lại bài 13: thread khác có thể "không nhìn thấy" giá trị mới, thậm chí thấy một object chưa khởi tạo xong. <strong>Field <code>final</code> có một đảm bảo đặc biệt</strong> trong Java Memory Model:</p>
+<p><em>"A thread that can only see a reference to an object after that object has been completely initialized is guaranteed to see the correctly initialized values for that object's final fields."</em><a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.5">[JLS §17.5]</a></p>
+<p>Nói đơn giản: miễn constructor không để lộ <code>this</code> ra ngoài khi chưa chạy xong, thì mọi thread khác đều thấy đúng giá trị của các field <code>final</code>, mà không cần <code>volatile</code> hay <code>synchronized</code>. Kết hợp với tính bất biến (không ai sửa được), object immutable là loại object <strong>an toàn nhất</strong> để chia sẻ giữa nhiều thread. Đó là lý do <code>String</code>, <code>Integer</code>, <code>List.of(...)</code> và <code>record</code> đều được thiết kế bất biến.</p>
+
+<div class="callout"><strong>Câu phỏng vấn: "final List thì có thêm phần tử được không? final khác immutable thế nào?"</strong>
+<p><em>"Được. <code>final</code> trên biến chỉ cấm gán lại biến đó, tức là tham chiếu không đổi, chứ object mà nó trỏ tới vẫn sửa được, nên <code>final List</code> vẫn <code>add</code> được. Immutable nghĩa là trạng thái của object không thể thay đổi sau khi tạo. Để làm một class immutable: các field <code>private final</code>, không có setter, chép phòng thủ (defensive copy) các field có thể bị sửa như <code>List.copyOf</code>, và đánh dấu class là <code>final</code> hoặc dùng record. Ngoài ra <code>final</code> trên method thì cấm override, trên class thì cấm kế thừa, ví dụ <code>String</code>. Field <code>final</code> còn được JMM đảm bảo hiển thị đúng cho các thread khác sau khi constructor chạy xong."</em></p></div>
+
+<h2>7 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q15"></div>
+<script type="application/json" id="q15">[
+ {"q":"<code>final List&lt;String&gt; ds = new ArrayList&lt;&gt;();</code> Dòng nào sẽ gây <strong>lỗi biên dịch</strong>?",
+  "options":["ds.add(\"a\");","ds = new ArrayList&lt;&gt;();","ds.clear();","ds.remove(\"a\");"],
+  "answer":1,"why":"<code>final</code> chỉ cấm gán lại biến <code>ds</code> sang object khác. Các thao tác sửa nội dung list như <code>add</code>, <code>clear</code>, <code>remove</code> vẫn hợp lệ."},
+ {"q":"Class có field <code>private final List&lt;String&gt; items</code>, constructor gán thẳng <code>this.items = items</code>, và getter trả về <code>items</code>. Class này có thật sự bất biến không?",
+  "options":["Có, vì field đã là private final","Có, vì class không hề có setter","Không, vì List gốc vẫn bị sửa từ ngoài","Không, vì final không dùng được với List"],
+  "answer":2,"why":"Field trỏ tới đúng list người gọi đang cầm, và getter đưa nó ra ngoài. Ai giữ tham chiếu đều sửa được. Phải chép phòng thủ bằng <code>List.copyOf</code>."},
+ {"q":"Vì sao biến cục bộ dùng trong lambda phải là final hoặc effectively final?",
+  "options":["Vì lambda chỉ chép giá trị biến, không giữ lại biến","Vì lambda luôn chạy trên một thread riêng","Vì biến cục bộ được lưu trong String pool","Vì JIT không biên dịch được biến bị sửa"],
+  "answer":0,"why":"Biến cục bộ sống trên stack của method, còn lambda có thể chạy sau đó (thậm chí ở thread khác). Java cho lambda chép giá trị, nên giá trị đó không được phép thay đổi."},
+ {"q":"Method gắn <code>@Transactional</code> được khai báo <code>final</code>, và Spring dùng CGLIB để tạo proxy. Chuyện gì xảy ra?",
+  "options":["Spring tự bỏ chữ final rồi tạo proxy","Transaction vẫn chạy bình thường như cũ","Ứng dụng không khởi động, báo lỗi ngay","Transaction không có tác dụng ở method đó"],
+  "answer":3,"why":"CGLIB tạo class con và override method để chèn thêm việc. Method <code>final</code> không override được, nên lời gọi đi thẳng vào code gốc và không có transaction (bài 12)."},
+ {"q":"(Ôn bài 14) Chương trình dùng <code>Executors.newFixedThreadPool</code>, chạy hết <code>main</code> nhưng không thoát. Vì sao?",
+  "options":["Vì pool bị deadlock giữa các thread với nhau","Vì quên shutdown nên thread pool chờ việc mãi","Vì main chưa gọi join cho từng thread","Vì thiếu volatile cho biến dùng chung"],
+  "answer":1,"why":"Thread của pool là thread thường, đứng chờ việc mới trong hàng đợi (<code>LinkedBlockingQueue.take</code>). Phải gọi <code>shutdown()</code> hoặc dùng <code>try (...)</code>."}
+]</script>
+
+<h2>8 · Thử thách: tự làm một class bất biến</h2>
+<div class="lab">
+<p><strong>Nhiệm vụ:</strong> viết lại <code>DonHang</code> dưới dạng <code>record</code> (Java 16+) sao cho chạy lại thí nghiệm ở mục 5 thì đơn hàng <strong>không bị sửa</strong>, cả khi sửa list gốc lẫn khi sửa qua getter.</p>
+<p>Gợi ý: record tự sinh constructor, getter, <code>equals</code> và <code>hashCode</code>, và mọi field của record đều là <code>private final</code>. Nhưng record <strong>không</strong> tự chép list cho bạn. Bạn cần viết một <em>compact constructor</em>:</p>
+<pre><code>record DonHang(List&lt;String&gt; monHang) {
+    DonHang {
+        // viết gì ở đây?
+    }
+}</code></pre>
+<details><summary>Xem lời giải</summary>
+<pre><code>record DonHang(List&lt;String&gt; monHang) {
+    DonHang {
+        monHang = List.copyOf(monHang);   // gán lại THAM SỐ trước khi record gán vào field final
+    }
+}</code></pre>
+<div class="expect"><pre><code>Sau khi sửa ds: [sách, bút]
+clear bị chặn: java.lang.UnsupportedOperationException</code></pre></div>
+<p>Trong compact constructor, <code>monHang</code> là <em>tham số</em> chứ không phải field. Bạn gán cho nó bản chép, rồi record mới tự gán tham số đó vào field <code>final</code>. Getter <code>monHang()</code> trả về bản không sửa được, nên <code>clear()</code> sẽ ném <code>UnsupportedOperationException</code>.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.10.4">[JLS §8.10.4]</a> Hãy tự viết thử và chạy để kiểm chứng, rồi gửi code cho agent để được nhận xét.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: <code>final</code> có làm code chạy nhanh hơn không?</summary>
+<p>Một lời khuyên cũ hay gặp: "đánh dấu method <code>final</code> để JVM chạy nhanh hơn". Với JVM hiện đại thì điều này gần như không còn đúng. JIT (bài 6) tự quan sát xem lúc chạy method có thực sự bị override hay không, rồi tối ưu (inline) tương ứng, dù bạn có viết <code>final</code> hay không. Vì vậy hãy dùng <code>final</code> vì <strong>thiết kế</strong> (cấm gán lại, cấm override, làm object bất biến), không phải vì hiệu năng.</p>
+<p>Ngoại lệ đã gặp ở bài 5: <code>static final</code> với giá trị viết sẵn là <em>compile-time constant</em>. <code>javac</code> chép thẳng giá trị đó vào nơi dùng, nên việc đọc nó không kích hoạt khởi tạo class.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/essential/concurrency/imstrat.html">Oracle Java Tutorial: A Strategy for Defining Immutable Objects</a>. Ngắn, liệt kê đúng các quy tắc ở mục 5. Đọc sâu hơn: <em>Effective Java</em> (Joshua Bloch, đã có trong <code>RESOURCES.md</code>), Item 17 "Minimize mutability" và Item 50 "Make defensive copies when needed".</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "final với static final khác nhau thế nào?", "mảng final thì sửa phần tử được không?", "khi nào nên đánh dấu class là final?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0014-thread-pool.html">← Bài 14: Thread pool</a><a href="../reference/glossary.html">Glossary →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

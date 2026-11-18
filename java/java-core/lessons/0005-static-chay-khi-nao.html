@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Static chạy khi nào</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Khối <code>static</code> chạy khi nào?</h1>
+<p class="subtitle">Bài 5 · Class được "khởi tạo" lúc nào, theo thứ tự nào, và chuyện gì xảy ra khi nó khởi tạo thất bại</p>
+<div class="meta"><span>~30 phút</span><span>Cần biết: <a href="0001-tu-source-den-bytecode.html">Bài 1</a> (JVM nạp class khi cần)</span><span>Thư mục thực hành: <code>lab/l0005</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Biết chính xác khối <code>static { }</code> chạy <strong>lúc nào</strong> và chạy <strong>mấy lần</strong>.</li>
+  <li>Trả lời được câu phỏng vấn kinh điển về thứ tự chạy giữa <code>static</code> và constructor của class cha, class con.</li>
+  <li>Đọc hiểu lỗi <code>NoClassDefFoundError: Could not initialize class ...</code> và biết tìm nguyên nhân thật của nó.</li>
+</ul>
+
+<h2>1 · Ôn bài 1 (trả lời trong đầu trước)</h2>
+<div class="callout">Khi chạy chương trình, JVM có nạp <em>tất cả</em> class ngay từ đầu không?
+<details><summary>Kiểm tra</summary>Không. JVM rất <strong>lười</strong>: nó chỉ nạp một class khi thật sự cần dùng tới. Ở bài 1, <code>Helper.class</code> có trên ổ cứng nhưng không được nạp nếu không ai dùng. Bài hôm nay đi tiếp ý đó.</details></div>
+
+<h2>2 · Câu chuyện cửa hàng</h2>
+
+<div class="analogy">
+<p>Một cửa hàng có hai loại việc:</p>
+<ul>
+  <li><strong>Việc của cửa hàng:</strong> dọn dẹp, bật đèn, mở cửa. Chỉ làm <strong>một lần</strong>, đúng lúc <strong>vị khách đầu tiên</strong> tới. Không có khách nào thì cửa hàng không mở.</li>
+  <li><strong>Việc cho từng khách:</strong> lấy một cái ghế, rót một cốc nước. Khách nào tới cũng được làm, <strong>mỗi khách một lần</strong>.</li>
+</ul>
+</div>
+
+<p>Một class Java cũng có đúng hai loại việc như vậy:</p>
+<table>
+  <tr><th>Trong câu chuyện</th><th>Trong Java</th><th>Chạy mấy lần?</th></tr>
+  <tr><td>Việc của cửa hàng</td><td>Khối <code>static { ... }</code> và biến <code>static</code></td><td><strong>Một lần duy nhất</strong> cho cả chương trình</td></tr>
+  <tr><td>Việc cho từng khách</td><td>Constructor, chạy mỗi lần <code>new</code></td><td>Mỗi object một lần</td></tr>
+</table>
+<p>Việc "mở cửa hàng" có tên chính thức là <span class="term">khởi tạo class</span> (class initialization): JVM chạy hết các khối <code>static</code> và gán giá trị cho các biến <code>static</code> của class đó.</p>
+
+<h2>3 · Tận mắt xem: static chạy lúc nào?</h2>
+<p>Mở <code>WhenStatic.java</code>:</p>
+<pre><code>public class WhenStatic {
+    public static void main(String[] args) {
+        System.out.println("1. main bắt đầu");
+        System.out.println("2. sắp gọi Shop.open() lần đầu");
+        Shop.open();
+        System.out.println("3. sắp gọi Shop.open() lần hai");
+        Shop.open();
+    }
+}
+
+class Shop {
+    static {
+        System.out.println("   >>> [static] Dọn dẹp, mở cửa hàng (chỉ 1 lần)");
+    }
+    static void open() {
+        System.out.println("   Phục vụ một khách");
+    }
+}</code></pre>
+<p><strong>Đoán trước:</strong> dòng <code>&gt;&gt;&gt; [static]</code> sẽ in ra ở đâu? Ngay đầu chương trình, sau dòng 2, hay in hai lần? Ghi ra giấy rồi chạy:</p>
+<pre><code>cd lab/l0005
+javac WhenStatic.java
+java WhenStatic</code></pre>
+<div class="expect"><pre><code>1. main bắt đầu
+2. sắp gọi Shop.open() lần đầu
+   >>> [static] Dọn dẹp, mở cửa hàng (chỉ 1 lần)
+   Phục vụ một khách
+3. sắp gọi Shop.open() lần hai
+   Phục vụ một khách</code></pre></div>
+<p>Đọc kết quả từng dòng:</p>
+<ol class="flow">
+  <li>Dòng 1 và 2 in ra <strong>trước</strong> khối static. Lúc này chưa ai đụng tới <code>Shop</code>, nên cửa hàng chưa mở.</li>
+  <li><code>Shop.open()</code> là lần đầu tiên chương trình dùng tới <code>Shop</code>. JVM nạp class <code>Shop</code>, chạy khối <code>static</code>, rồi mới chạy <code>open()</code>.</li>
+  <li>Lần gọi thứ hai, khối static <strong>không chạy lại</strong>, vì cửa hàng đã mở rồi.</li>
+</ol>
+
+<p>Vậy cụ thể "dùng tới lần đầu" là những lúc nào? Có 4 trường hợp hay gặp:<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-12.html#jls-12.4.1">[JLS §12.4.1]</a></p>
+<ul>
+  <li>Tạo object: <code>new Shop()</code></li>
+  <li>Gọi method static: <code>Shop.open()</code></li>
+  <li>Đọc hoặc gán biến static: <code>Shop.count</code> (trừ <em>hằng số</em>, xem phần thử thách)</li>
+  <li>Một class <strong>con</strong> của <code>Shop</code> được khởi tạo, vì cha luôn được khởi tạo trước con</li>
+</ul>
+
+<div class="remember">Khối <code>static</code> chạy <strong>đúng một lần</strong>, vào <strong>lần đầu tiên</strong> class được dùng tới. Không phải lúc chương trình bắt đầu.</div>
+
+<h2>4 · Cha và con: ai chạy trước?</h2>
+<p>Đây là câu phỏng vấn rất hay gặp. Mở <code>Order.java</code>:</p>
+<pre><code>class Parent {
+    static { System.out.println("A. Parent static"); }
+    Parent()  { System.out.println("C. Parent constructor"); }
+}
+
+class Child extends Parent {
+    static { System.out.println("B. Child static"); }
+    Child()   { System.out.println("D. Child constructor"); }
+}
+
+// trong main:
+new Child();   // lần 1
+new Child();   // lần 2</code></pre>
+<p><strong>Đoán trước:</strong> sắp xếp A, B, C, D theo thứ tự in ra, cho cả lần 1 và lần 2.</p>
+<pre><code>javac Order.java
+java Order</code></pre>
+<div class="expect"><pre><code>--- new Child() lần 1
+A. Parent static
+B. Child static
+C. Parent constructor
+D. Child constructor
+--- new Child() lần 2
+C. Parent constructor
+D. Child constructor</code></pre></div>
+
+<div class="analogy">
+<p>Muốn mở <strong>chi nhánh</strong> (con) thì <strong>công ty mẹ</strong> (cha) phải được thành lập trước. Cả hai chỉ mở một lần (A rồi B).</p>
+<p>Mỗi khách tới chi nhánh thì nhận "phần của công ty mẹ" trước, rồi tới "phần của chi nhánh" (C rồi D).</p>
+</div>
+
+<ul>
+  <li><strong>A → B:</strong> muốn khởi tạo <code>Child</code> thì JVM phải khởi tạo <code>Parent</code> trước.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-12.html#jls-12.4.2">[JLS §12.4.2]</a></li>
+  <li><strong>C → D:</strong> constructor của con luôn tự gọi <code>super()</code> (constructor của cha) <em>đầu tiên</em>. Ở bài 1 bạn đã thấy <code>javac</code> tự thêm lời gọi <code>super()</code> này.</li>
+  <li><strong>Lần 2 chỉ có C, D:</strong> static đã chạy rồi, không chạy lại nữa.</li>
+</ul>
+
+<div class="callout"><strong>Câu trả lời phỏng vấn mẫu</strong>
+<p><em>"Static của cha → static của con (chỉ một lần, lúc class được dùng lần đầu) → constructor của cha → constructor của con (mỗi lần <code>new</code>)."</em></p></div>
+
+<h2>5 · Bug thật: cửa hàng mở cửa thất bại</h2>
+<p>Chuyện gì xảy ra nếu khối static <strong>bị lỗi</strong>? Đây là tình huống rất hay gặp ngoài đời: class <code>Config</code> đọc biến môi trường trong khối static, nhưng trên server lại quên cấu hình biến đó. Mở <code>Broken.java</code>:</p>
+<pre><code>class Config {
+    static String URL = loadUrl();          // chạy khi Config được khởi tạo
+    static String loadUrl() {
+        throw new IllegalStateException("thiếu biến môi trường DB_URL");
+    }
+}
+
+// trong main: thử đọc Config.URL hai lần, mỗi lần bắt lỗi và in ra</code></pre>
+<pre><code>javac Broken.java
+java Broken</code></pre>
+<div class="expect"><pre><code>Lần 1: java.lang.ExceptionInInitializerError
+Lần 2: java.lang.NoClassDefFoundError: Could not initialize class Config</code></pre></div>
+<p>Hai lần chạy cùng một dòng code mà ra <strong>hai lỗi khác nhau</strong>!</p>
+
+<div class="analogy">
+<p>Lần đầu mở cửa hàng thì bị cháy. Chủ cửa hàng treo một tấm biển <strong>"Cửa hàng hỏng"</strong> và không bao giờ thử mở lại nữa.</p>
+<p>Khách thứ hai tới chỉ thấy tấm biển. Tấm biển <strong>không ghi</strong> lý do cháy.</p>
+</div>
+
+<ol class="flow">
+  <li><strong>Lần 1:</strong> JVM chạy phần static, gặp lỗi. Nó bọc lỗi gốc lại thành <code>ExceptionInInitializerError</code> ("lỗi khi khởi tạo"). Lỗi gốc (<code>thiếu biến môi trường DB_URL</code>) nằm bên trong.</li>
+  <li>JVM đánh dấu class <code>Config</code> là <strong>hỏng vĩnh viễn</strong> cho tới khi tắt chương trình. Nó không thử khởi tạo lại.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-12.html#jls-12.4.2">[JLS §12.4.2]</a></li>
+  <li><strong>Lần 2 trở đi:</strong> JVM chỉ báo <code>NoClassDefFoundError: Could not initialize class Config</code>. Đây là tấm biển "hỏng".</li>
+</ol>
+
+<h3>Cách debug lỗi này</h3>
+<p>Tên lỗi <code>NoClassDefFoundError</code> rất dễ gây hiểu lầm. Nhiều người đọc thấy "Class Not Found" là nghĩ thiếu file <code>.class</code> hoặc thiếu thư viện, rồi mất cả buổi kiểm tra classpath. Nhưng nếu thông báo có chữ <strong>"Could not initialize class"</strong> thì file vẫn còn nguyên. Vấn đề là <strong>khối static đã bị lỗi từ trước</strong>.</p>
+<p>Cách tìm nguyên nhân thật:</p>
+<ul>
+  <li><strong>Java 18 trở lên</strong> (máy bạn dùng Java 21): đọc dòng <code>Caused by:</code> ngay dưới lỗi. JVM đã đính kèm lỗi gốc vào đó.<a class="cite" href="https://bugs.openjdk.org/browse/JDK-8048190">[JDK-8048190, sửa ở Java 18]</a></li>
+  <li><strong>Java 8, 11, 17</strong> (vẫn rất phổ biến ở các công ty): không có thông tin đó. Bạn phải <strong>cuộn log ngược lên</strong> để tìm dòng <code>ExceptionInInitializerError</code> <em>đầu tiên</em>. Lỗi thật nằm ở đó.</li>
+</ul>
+
+<div class="remember">Thấy <code>NoClassDefFoundError: Could not initialize class X</code> → đừng đi tìm file bị thiếu. Hãy tìm <code>ExceptionInInitializerError</code> <strong>đầu tiên</strong> trong log: đó mới là lỗi thật trong phần <code>static</code> của <code>X</code>.</div>
+
+<h2>6 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q5"></div>
+<script type="application/json" id="q5">[
+ {"q":"Class <code>Shop</code> có khối <code>static</code>. Chương trình gọi <code>Shop.open()</code> ba lần. Khối static chạy mấy lần?",
+  "options":["Ba lần, mỗi lần gọi open chạy một lần","Một lần, vào lần đầu tiên gọi open","Không lần nào, vì open là method static","Một lần, ngay khi main vừa bắt đầu chạy"],
+  "answer":1,"why":"Khối static chạy đúng một lần, vào lần đầu tiên class được dùng tới. Trong <code>WhenStatic</code>, dòng static in ra <em>sau</em> dòng 2 chứ không phải lúc <code>main</code> bắt đầu."},
+ {"q":"<code>Child extends Parent</code>, cả hai đều có khối static và constructor. Gọi <code>new Child()</code> lần đầu, thứ tự nào đúng?",
+  "options":["static con, static cha, constructor cha, constructor con","constructor cha, constructor con, static cha, static con","static cha, constructor cha, static con, constructor con","static cha, static con, constructor cha, constructor con"],
+  "answer":3,"why":"Khởi tạo class trước (cha rồi con), sau đó mới tạo object. Constructor con luôn gọi <code>super()</code> trước, nên constructor cha chạy trước constructor con."},
+ {"q":"Gọi <code>new Child()</code> <strong>lần thứ hai</strong>. Những gì được in ra?",
+  "options":["Chỉ hai constructor: cha rồi đến con","Cả bốn dòng, y hệt như lần thứ nhất","Chỉ hai khối static: cha rồi đến con","Không in gì, vì object đã tạo trước đó"],
+  "answer":0,"why":"Static chỉ chạy một lần cho cả chương trình. Nhưng mỗi lần <code>new</code> là một object mới, nên constructor chạy lại."},
+ {"q":"Log báo <code>NoClassDefFoundError: Could not initialize class Config</code>. Nên làm gì đầu tiên?",
+  "options":["Kiểm tra file Config.class có bị thiếu","Tìm ExceptionInInitializerError đầu tiên","Cài lại JDK vì JVM bị lỗi khi chạy","Xoá thư mục build rồi biên dịch lại"],
+  "answer":1,"why":"\"Could not initialize\" nghĩa là file vẫn còn, nhưng phần static của <code>Config</code> đã lỗi ở lần trước. Lỗi thật nằm ở <code>ExceptionInInitializerError</code> đầu tiên (hoặc dòng <code>Caused by</code> trên Java 18+)."},
+ {"q":"(Ôn bài 4) <code>String role</code> lấy từ request HTTP, có giá trị <code>\"admin\"</code>. <code>role == \"admin\"</code> cho kết quả gì?",
+  "options":["Luôn true, vì nội dung hai chuỗi giống nhau","Luôn lỗi biên dịch khi so sánh String","Gần như luôn false, vì là object khác","Tuỳ máy, ngẫu nhiên true hoặc false"],
+  "answer":2,"why":"Dữ liệu từ bên ngoài được tạo lúc chạy, không nằm trên \"kệ\" String pool, nên là object khác với literal <code>\"admin\"</code>. Phải dùng <code>equals</code>."}
+]</script>
+
+<h2>7 · Thử thách: lúc nào thì Box mở cửa?</h2>
+<div class="lab">
+<p>Mở <code>Challenge.java</code>:</p>
+<pre><code>System.out.println("1. tạo mảng");
+Box[] boxes = new Box[3];
+System.out.println("2. đọc hằng số");
+System.out.println("   MAX = " + Box.MAX);
+System.out.println("3. đọc biến static thường");
+System.out.println("   count = " + Box.count);
+
+class Box {
+    static final int MAX = 10;   // hằng số
+    static int count = 5;        // biến static thường
+    static { System.out.println("   >>> [static] Box được khởi tạo"); }
+}</code></pre>
+<p><strong>Câu hỏi:</strong> dòng <code>&gt;&gt;&gt; [static] Box được khởi tạo</code> sẽ in ra ngay sau dòng 1, dòng 2 hay dòng 3? Gợi ý:</p>
+<ul>
+  <li><code>new Box[3]</code> tạo một <strong>mảng 3 ô trống</strong>. Nó có tạo ra object <code>Box</code> nào không?</li>
+  <li><code>MAX</code> là <code>static final</code> với giá trị viết sẵn. Ở bài 4, <code>javac</code> đã tự ghép <code>"h" + "i"</code> ngay lúc biên dịch. Liệu nó có làm điều tương tự với <code>MAX</code>?</li>
+</ul>
+<pre><code>javac Challenge.java
+java Challenge</code></pre>
+<details><summary>Xem đáp án</summary>
+<div class="expect"><pre><code>1. tạo mảng
+2. đọc hằng số
+   MAX = 10
+3. đọc biến static thường
+   >>> [static] Box được khởi tạo
+   count = 5</code></pre></div>
+<ul>
+  <li><strong>Sau dòng 1, không:</strong> <code>new Box[3]</code> chỉ tạo một mảng gồm 3 ô rỗng (<code>null</code>). Chưa có object <code>Box</code> nào được tạo, nên cửa hàng chưa cần mở.</li>
+  <li><strong>Sau dòng 2, không:</strong> <code>MAX</code> là <span class="term">hằng số lúc biên dịch</span> (compile-time constant). <code>javac</code> chép thẳng số <code>10</code> vào chỗ dùng, nên lúc chạy chương trình không cần hỏi <code>Box</code> nữa.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-13.html#jls-13.1">[JLS §13.1]</a></li>
+  <li><strong>Sau dòng 3, có:</strong> <code>count</code> là biến static thường, phải hỏi <code>Box</code> mới biết giá trị, nên <code>Box</code> được khởi tạo đúng lúc này.</li>
+</ul>
+<p><strong>Hệ quả thật khi đi làm:</strong> vì <code>javac</code> chép thẳng giá trị hằng số vào nơi dùng, nếu bạn đổi <code>MAX</code> trong một thư viện mà <em>không biên dịch lại</em> code đang dùng thư viện đó, code cũ vẫn dùng giá trị cũ.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: ba giai đoạn của một class trong JVM</summary>
+<p>Từ lúc JVM "thấy" một class tới lúc dùng được nó, class đi qua ba giai đoạn:<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-5.html">[JVMS ch.5]</a></p>
+<ol class="flow">
+  <li><strong>Loading (nạp):</strong> tìm file <code>.class</code> và đọc vào bộ nhớ. Đây là việc của <em>class loader</em>.</li>
+  <li><strong>Linking (liên kết):</strong> kiểm tra bytecode hợp lệ (verify), rồi cấp chỗ cho biến static với giá trị mặc định (0, <code>null</code>, <code>false</code>).</li>
+  <li><strong>Initialization (khởi tạo):</strong> chạy khối static và gán giá trị thật cho biến static. Đây chính là phần "mở cửa hàng" của bài này.</li>
+</ol>
+<p>Muốn xem khối static nằm đâu trong bytecode thì chạy <code>javap -c Shop</code>. <code>javac</code> gom mọi khối static và mọi lệnh gán biến static vào một method đặc biệt, hiện ra dưới dạng <code>static {};</code> (tên thật bên trong là <code>&lt;clinit&gt;</code>, viết tắt của "class init"):</p>
+<pre><code>  static {};
+    Code:
+       0: getstatic     #7    // System.out
+       3: ldc           #21   // String    >>> [static] Dọn dẹp, mở cửa hàng ...
+       5: invokevirtual #15   // println
+       8: return</code></pre>
+<p>Đó cũng là lý do stack trace của lỗi ở mục 5 có dòng <code>at Config.&lt;clinit&gt;</code>.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/java/javaOO/initial.html">Oracle Java Tutorial: Initializing Fields</a>. Bài ngắn, dễ đọc, giải thích khối static và cách khởi tạo biến. Muốn đọc định nghĩa gốc về thời điểm khởi tạo thì xem <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-12.html#jls-12.4">JLS §12.4 Initialization of Classes and Interfaces</a> (khó hơn).</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Bạn cũng có thể gửi kết quả quiz và đáp án đoán của thử thách để bài sau được chỉnh cho vừa sức bạn.</p>
+
+<div class="footer-nav"><a href="0004-string-pool.html">← Bài 4: String pool</a><a href="0006-jit-warm-up.html">Bài 6: JIT và warm-up →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

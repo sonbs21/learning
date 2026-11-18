@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stack, heap và pass-by-value</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Java luôn truyền giá trị</h1>
+<p class="subtitle">Bài 2 · Stack frame, heap, và câu phỏng vấn "pass-by-value hay pass-by-reference?"</p>
+<div class="meta"><span>~30 phút</span><span>Cần biết: <a href="0001-tu-source-den-bytecode.html">Bài 1</a> (local variable slot, javap)</span><span>Lab: <code>./lab/l0002</code></span></div>
+
+<div class="callout"><strong>Ôn bài 1 (trả lời trong đầu trước khi đọc)</strong>
+Trong một method <code>static</code>, slot 0 của biến cục bộ chứa gì? Lệnh <code>aload_0</code> làm gì với nó?
+<details><summary>Kiểm tra</summary>Slot 0 chứa tham số đầu tiên. <code>aload_0</code> đẩy giá trị trong slot 0 (một tham chiếu) lên operand stack.</details></div>
+
+<div class="callout"><strong>Đoán trước khi đọc</strong>
+Mở <code>lab/l0002/PassByValue.java</code>. Có 4 method: <code>changeInt</code>, <code>changeField</code>, <code>reassign</code>, <code>swap</code>. Ghi ra giấy 4 dòng output mà bạn đoán, <em>rồi</em> mới chạy:
+<pre><code>cd lab/l0002 &amp;&amp; javac PassByValue.java &amp;&amp; java PassByValue</code></pre></div>
+
+<h2>1 · Hai vùng nhớ, hai luật chơi</h2>
+<p>JVM spec mô tả nhiều vùng nhớ runtime. Bài này chỉ cần hai vùng:<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5">[JVMS §2.5]</a></p>
+<table>
+  <tr><th></th><th>Stack (của mỗi thread)</th><th>Heap (dùng chung)</th></tr>
+  <tr><td>Chứa gì</td><td><strong>Frame</strong>: mỗi lần gọi method sinh ra một frame, gồm local variable slots và operand stack</td><td><strong>Object</strong> và mảng, tức mọi thứ tạo bằng <code>new</code></td></tr>
+  <tr><td>Sống đến khi</td><td>Method return thì frame bị bỏ ngay</td><td>Không còn ai tham chiếu tới, rồi GC dọn</td></tr>
+  <tr><td>Ai thấy</td><td>Chỉ thread đó</td><td>Mọi thread (gốc rễ của bug concurrency)</td></tr>
+</table>
+<p>Một slot chỉ chứa được hai loại giá trị: <strong>giá trị primitive</strong> (<code>int</code>, <code>double</code>...) hoặc <strong>tham chiếu</strong> (reference) trỏ tới object trên heap. Một slot không bao giờ chứa nguyên cả object.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.1">[JLS §4.1]</a> Trong bài, ta viết tham chiếu thành <code class="ref">@A1</code>. Bạn cứ hình dung nó như "địa chỉ" của object.</p>
+
+<p class="big-idea">Khi gọi method, JVM <em>sao chép</em> giá trị trong slot của caller sang slot của frame mới. Với object, thứ được sao chép là <em>tham chiếu</em>, còn object thì vẫn nằm yên một chỗ trên heap.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.12.4.5">[JLS §15.12.4.5]</a></p>
+
+<h2>2 · Vẽ ra từng trường hợp</h2>
+
+<h3>Trường hợp 2: <code>changeField(box)</code> → <code>box.value = 99</code></h3>
+<div class="mem">
+  <div class="mem-col"><h4>Stack</h4>
+    <div class="frame top"><div class="frame-name">changeField</div><div class="slot"><span>b</span><span class="ref">@A1</span></div></div>
+    <div class="frame"><div class="frame-name">main</div><div class="slot"><span>box</span><span class="ref">@A1</span></div></div>
+  </div>
+  <div class="mem-col"><h4>Heap</h4>
+    <div class="obj"><div class="obj-name">@A1 · Box</div><div class="slot"><span>value</span><span><span class="old">1</span>99</span></div></div>
+  </div>
+  <p class="mem-caption"><code>b</code> và <code>box</code> là hai slot khác nhau, nhưng giữ cùng một tham chiếu. Sửa field của object thì cả hai đều thấy thay đổi.</p>
+</div>
+
+<h3>Trường hợp 3: <code>reassign(box2)</code> → <code>b = new Box(99)</code></h3>
+<div class="mem">
+  <div class="mem-col"><h4>Stack</h4>
+    <div class="frame top"><div class="frame-name">reassign</div><div class="slot"><span>b</span><span><span class="old">@B1</span><span class="ref">@B2</span></span></div></div>
+    <div class="frame"><div class="frame-name">main</div><div class="slot"><span>box2</span><span class="ref">@B1</span></div></div>
+  </div>
+  <div class="mem-col"><h4>Heap</h4>
+    <div class="obj"><div class="obj-name">@B1 · Box</div><div class="slot"><span>value</span><span>1</span></div></div>
+    <div class="obj garbage"><div class="obj-name">@B2 · Box (thành rác sau khi return)</div><div class="slot"><span>value</span><span>99</span></div></div>
+  </div>
+  <p class="mem-caption">Gán lại <code>b</code> chỉ ghi đè slot của <code>reassign</code>. Slot <code>box2</code> của <code>main</code> không bị đụng tới.</p>
+</div>
+
+<p>Bytecode cho thấy đúng điều này (<code>javap -c PassByValue</code>):</p>
+<pre><code>static void changeField(PassByValue$Box);
+   0: aload_0              <span class="ask">// lấy tham chiếu trong slot 0</span>
+   1: bipush 99
+   3: <span class="hl">putfield</span> value       <span class="ask">// ghi vào object trên HEAP</span>
+
+static void reassign(PassByValue$Box);
+   0: new PassByValue$Box  <span class="ask">// tạo object mới trên heap</span>
+   ...
+   9: <span class="hl">astore_0</span>             <span class="ask">// ghi đè slot 0 của frame NÀY</span></code></pre>
+<p>Chỉ có hai cách để "thay đổi" một thứ: <code>putfield</code> sửa object (ai cầm tham chiếu cũng thấy), còn <code>astore</code> sửa slot (chỉ frame đó thấy). Không lệnh bytecode nào cho phép một method ghi vào slot thuộc frame của method khác. Vì thế Java <strong>không thể</strong> có pass-by-reference.</p>
+
+<div class="callout"><strong>Câu trả lời phỏng vấn mẫu</strong>
+"Java luôn là pass-by-value. Với primitive, giá trị được sao chép. Với object, <em>tham chiếu</em> được sao chép. Vì vậy method sửa được trạng thái của object, nhưng không làm biến của caller trỏ sang object khác được. Ví dụ: hàm <code>swap(a, b)</code> không hoạt động trong Java."</div>
+
+<h2>3 · Stack có giới hạn</h2>
+<p>Mỗi thread có một stack riêng với kích thước cố định. Trên máy này mặc định là 1 MB (<code>ThreadStackSize = 1024</code> KB), và chỉnh được bằng <code>-Xss</code>.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/specs/man/java.html">[java man: -Xss]</a> Đệ quy không có điểm dừng sẽ đẩy thêm frame cho đến khi stack đầy:</p>
+<pre><code>javac Depth.java
+java -Xss256k Depth   <span class="ask"># StackOverflowError ở độ sâu ~2 679</span>
+java -Xss1m   Depth   <span class="ask"># ~22 000</span>
+java -Xss4m   Depth   <span class="ask"># ~101 000</span></code></pre>
+<p>Con số này đổi một chút sau mỗi lần chạy (22 364, 22 203, 22 350...). Lý do là frame của code đang thông dịch và frame của code đã JIT có kích thước khác nhau (nhớ lại <a href="0001-tu-source-den-bytecode.html">bài 1</a>). Ngoài production, <code>StackOverflowError</code> thường đến từ đệ quy vô tình, ví dụ hai entity trỏ qua lại nhau và <code>toString()</code>/JSON serialize gọi nhau mãi không dừng.</p>
+
+<h2>4 · Kiểm tra</h2>
+<div class="quiz" data-quiz="q2"></div>
+<script type="application/json" id="q2">[
+ {"q":"<code>Box b = new Box(1);</code> trong <code>main</code>. Theo mô hình JVM, cái gì nằm trong frame của <code>main</code>?",
+  "options":["Cả object Box lẫn field value của nó","Chỉ field value, còn biến b nằm trên heap","Biến b, chứa một tham chiếu tới object","Không có gì, mọi thứ đều nằm trên heap"],
+  "answer":2,"why":"Slot chỉ chứa primitive hoặc tham chiếu. Object (cùng field <code>value</code>) nằm trên heap; slot <code>b</code> trong frame chỉ giữ tham chiếu tới nó."},
+ {"q":"Vì sao <code>swap(p, q)</code> không đổi được <code>p</code> và <code>q</code> của <code>main</code>?",
+  "options":["Vì object Box là immutable, không đổi được","Vì JVM khoá object khi đang truyền vào","Vì thiếu từ khoá final ở hai tham số","Vì swap chỉ đổi hai bản sao trong frame riêng"],
+  "answer":3,"why":"<code>a</code> và <code>b</code> là slot trong frame của <code>swap</code>, mỗi slot giữ bản sao tham chiếu. Đổi chỗ hai slot đó không ảnh hưởng gì tới slot <code>p</code>, <code>q</code> của <code>main</code>."},
+ {"q":"Trong <code>reassign(Box b)</code> (static), lệnh <code>astore_0</code> ghi vào đâu?",
+  "options":["Slot 0 trong frame của chính reassign","Slot box2 trong frame của method main","Field value của object Box trên heap","Vùng nhớ chung mà mọi thread đều thấy"],
+  "answer":0,"why":"<code>astore_n</code> luôn ghi vào slot của frame hiện tại. Không lệnh nào ghi được vào frame của method khác, đó là bằng chứng ở mức bytecode cho pass-by-value."},
+ {"q":"<code>StackOverflowError</code> thực chất xảy ra khi nào?",
+  "options":["Khi heap hết chỗ để tạo thêm object mới","Khi stack của thread hết chỗ cho frame mới","Khi có quá nhiều thread chạy cùng một lúc","Khi GC không kịp dọn rác trên vùng heap"],
+  "answer":1,"why":"Mỗi lần gọi method sinh ra một frame trên stack của thread. Đệ quy không dừng làm stack đầy (mặc định ~1 MB). Heap hết chỗ là một lỗi khác: <code>OutOfMemoryError</code>."},
+ {"q":"Câu nào mô tả đúng nhất cách Java truyền một object vào method?",
+  "options":["Truyền object bằng reference như C++ &amp;","Sao chép toàn bộ object sang frame mới","Truyền giá trị, và giá trị đó là tham chiếu","Tuỳ object là mutable hay là immutable"],
+  "answer":2,"why":"Java luôn là pass-by-value (JLS §15.12.4.5). Với object, giá trị được sao chép là tham chiếu. Method sửa được object, nhưng không đổi được biến của caller."}
+]</script>
+
+<h2>5 · Thử thách</h2>
+<div class="lab">
+<h3>A. Đoán output (không chạy trước!)</h3>
+<pre><code>static void a(int[] arr)        { arr[0] = 10; arr = new int[]{20}; arr[0] = 30; }
+static void b(StringBuilder sb) { sb.append(" world"); sb = new StringBuilder("bye"); }
+static void c(String s)         { s = s + "!"; }
+
+int[] arr = {1};                 a(arr);
+StringBuilder sb = new StringBuilder("hello"); b(sb);
+String s = "hi";                 c(s);
+System.out.println(arr[0] + " | " + sb + " | " + s);</code></pre>
+<p>Viết đáp án ra giấy, vẽ sơ đồ stack/heap cho hàm <code>a</code>, rồi mới chạy <code>javac Challenge.java &amp;&amp; java Challenge</code>.</p>
+<details><summary>Đáp án</summary>
+<p><code>10 | hello world | hi</code></p>
+<ul>
+<li><code>a</code>: <code>arr[0] = 10</code> sửa mảng gốc trên heap. Sau đó <code>arr</code> được gán sang mảng mới, nên <code>arr[0] = 30</code> chỉ sửa mảng mới (sẽ thành rác).</li>
+<li><code>b</code>: <code>append</code> sửa object gốc. Gán <code>sb</code> sang object mới chỉ tác động tới slot của <code>b</code>.</li>
+<li><code>c</code>: <code>String</code> là immutable, nên <code>s + "!"</code> tạo ra object mới rồi gán vào slot của <code>c</code>. Đây là cùng cơ chế với <code>reassign</code>.</li>
+</ul></details>
+
+<h3>B. Tìm frame trong bytecode</h3>
+<p>Chạy <code>javap -v PassByValue | grep -A4 'void swap'</code> rồi tìm dòng <code>stack=..., locals=...</code> của <code>swap</code>. Đoán trước: <code>locals</code> bằng bao nhiêu, và mỗi slot là gì?</p>
+<details><summary>Đáp án</summary>
+<p><code>locals=3</code>: slot 0 = <code>a</code>, slot 1 = <code>b</code>, slot 2 = <code>t</code>. Kích thước frame được <code>javac</code> tính sẵn từ lúc build và ghi vào file .class.<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-4.html#jvms-4.7.3">[JVMS §4.7.3]</a></p></details>
+</div>
+
+<hr>
+<h2>Đọc thêm (nguồn chính)</h2>
+<p><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5">JVMS SE 21, §2.5 Run-Time Data Areas và §2.6 Frames</a>. Bạn sẽ thấy cả các vùng nhớ chưa học (method area, run-time constant pool, PC register). Chúng sẽ quay lại ở các bài class loading và GC.</p>
+
+<p class="ask">Có chỗ nào chưa rõ? Cứ hỏi agent (giáo viên của bạn). Một gợi ý để tự kiểm tra: hãy giải thích bằng lời vì sao <code>String</code> trong thử thách A "trông như" pass-by-value còn <code>StringBuilder</code> thì "trông như" pass-by-reference, dù thực chất cả hai giống hệt nhau. Gửi câu trả lời cho agent để được nhận xét.</p>
+
+<div class="footer-nav"><a href="0001-tu-source-den-bytecode.html">← Bài 1: Từ source đến bytecode</a><a href="0003-equals-hashcode.html">Bài 3: equals và hashCode →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

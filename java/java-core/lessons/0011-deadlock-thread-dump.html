@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deadlock và thread dump</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Ứng dụng "treo cứng": tìm ra thủ phạm bằng thread dump</h1>
+<p class="subtitle">Bài 11 · Deadlock là gì, cách chụp thread dump bằng <code>jcmd</code>, và cách đọc nó để tìm ra thread nào đang kẹt ở đâu</p>
+<div class="meta"><span>~35 phút</span><span>Cần biết: <a href="0010-race-condition.html">Bài 10</a> (thread, <code>synchronized</code>)</span><span>Thư mục thực hành: <code>lab/l0011</code></span><span>Cần mở 2 terminal</span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Hiểu <strong>deadlock</strong> xảy ra thế nào, và tự tạo ra được một deadlock.</li>
+  <li>Chụp được <strong>thread dump</strong> của một chương trình Java đang chạy, và đọc được nó.</li>
+  <li>Biết cách phòng tránh deadlock bằng quy tắc <strong>khoá theo cùng một thứ tự</strong>.</li>
+</ul>
+
+<h2>1 · Ôn bài 10 (trả lời trong đầu trước)</h2>
+<div class="callout">Khối <code>synchronized (lock) { ... }</code> làm gì? Trong câu chuyện ở bài 10, nó giống cái gì?
+<details><summary>Kiểm tra</summary>Mỗi lúc chỉ <strong>một</strong> thread được vào khối. Nó giống <strong>căn phòng có một chìa khoá duy nhất</strong>: ai cầm chìa thì vào, những người khác đứng chờ ngoài cửa. Hôm nay ta xem chuyện gì xảy ra khi có <em>hai</em> căn phòng và hai người cùng muốn vào cả hai.</details></div>
+
+<h2>2 · Câu chuyện: hai người, hai chìa khoá</h2>
+
+<div class="analogy">
+<p>Có hai két sắt, mỗi két có một chìa khoá: <strong>chìa A</strong> và <strong>chìa B</strong>. Muốn chuyển tiền giữa hai két thì phải cầm <strong>cả hai chìa</strong>.</p>
+<ul>
+  <li><strong>Nhân viên 1</strong> chuyển tiền A → B: cầm <strong>chìa A</strong> trước, rồi đi tìm chìa B.</li>
+  <li>Cùng lúc đó, <strong>nhân viên 2</strong> chuyển tiền B → A: cầm <strong>chìa B</strong> trước, rồi đi tìm chìa A.</li>
+</ul>
+<p>Nhân viên 1 đứng chờ chìa B, nhưng chìa B đang nằm trong tay nhân viên 2. Nhân viên 2 đứng chờ chìa A, nhưng chìa A lại nằm trong tay nhân viên 1. Không ai chịu buông chìa của mình ra, nên <strong>cả hai đứng chờ nhau mãi mãi</strong>.</p>
+</div>
+
+<p>Tình trạng nhiều thread <strong>chờ nhau vòng tròn</strong>, không ai đi tiếp được, gọi là <span class="term">deadlock</span> (khoá chết).<a class="cite" href="https://docs.oracle.com/javase/tutorial/essential/concurrency/deadlock.html">[Oracle Tutorial: Deadlock]</a> Khác với race condition ở bài 10 (chạy xong nhưng ra kết quả sai), deadlock làm chương trình <strong>đứng im</strong>: không lỗi, không log, không tốn CPU, chỉ đơn giản là không bao giờ xong.</p>
+
+<h2>3 · Tạo một deadlock thật</h2>
+<p>Mở <code>lab/l0011/Deadlock.java</code>. Code làm đúng như câu chuyện trên:</p>
+<pre><code>Thread t1 = new Thread(() -&gt; {
+    synchronized (taiKhoanA) {               // cầm chìa A
+        System.out.println("chuyen-A-sang-B: đã khoá A, chờ khoá B...");
+        nghi();                              // nghỉ 0,1 giây cho chắc chắn bị kẹt
+        synchronized (taiKhoanB) { ... }     // chờ chìa B
+    }
+}, "chuyen-A-sang-B");                      // đặt TÊN cho thread
+
+Thread t2 = new Thread(() -&gt; {
+    synchronized (taiKhoanB) {               // cầm chìa B
+        ...
+        synchronized (taiKhoanA) { ... }     // chờ chìa A
+    }
+}, "chuyen-B-sang-A");</code></pre>
+<p>Để ý: tham số thứ hai của <code>new Thread(..., "chuyen-A-sang-B")</code> là <strong>tên của thread</strong>. Tên này sẽ hiện ra trong thread dump, nên đặt tên rõ ràng giúp debug dễ hơn rất nhiều.</p>
+
+<p><strong>Terminal 1:</strong> chạy chương trình.</p>
+<pre><code>cd lab/l0011
+javac Deadlock.java
+java Deadlock</code></pre>
+<div class="expect"><pre><code>chuyen-A-sang-B: đã khoá A, chờ khoá B...
+chuyen-B-sang-A: đã khoá B, chờ khoá A...
+PID của chương trình: 509310</code></pre>
+<p style="margin:0">Rồi <strong>đứng im</strong>. Không có dòng "xong" nào, và chương trình không tự thoát. (Số PID trên máy bạn sẽ khác.)</p></div>
+<p>Đừng tắt nó. Để nguyên Terminal 1 như vậy.</p>
+
+<h2>4 · Chụp thread dump</h2>
+<p>Một <span class="term">thread dump</span> là <strong>ảnh chụp tức thời của mọi thread</strong> trong JVM: thread đó tên gì, đang ở trạng thái nào, đang chạy tới dòng code nào, đang giữ khoá nào và đang chờ khoá nào.</p>
+<div class="analogy">Giống như camera an ninh chụp lại toàn bộ cửa hàng tại đúng một thời điểm: ai đang đứng ở đâu, tay cầm gì, đang đợi ai.</div>
+
+<p><strong>Terminal 2:</strong> trước hết tìm PID (mã số tiến trình) của chương trình bằng <code>jps</code>, công cụ liệt kê các chương trình Java đang chạy:</p>
+<pre><code>jps</code></pre>
+<div class="expect"><pre><code>509310 Deadlock
+...           (có thể có thêm IntelliJ, VS Code... vì chúng cũng chạy bằng Java)</code></pre></div>
+<p>Rồi chụp thread dump bằng <code>jcmd</code> (thay số PID bằng số trên máy bạn):</p>
+<pre><code>jcmd 509310 Thread.print</code></pre>
+<p>(<code>jcmd</code> là công cụ chẩn đoán đa năng có sẵn trong JDK. Bạn sẽ thấy nhiều bài hướng dẫn dùng lệnh cũ <code>jstack &lt;PID&gt;</code>, cho ra kết quả tương tự. Tuy nhiên tài liệu chính thức ghi <code>jstack</code> là <em>"experimental and unsupported"</em>, và khuyên dùng <code>jcmd</code>.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/specs/man/jstack.html">[jstack man page]</a>)</p>
+
+<h2>5 · Đọc thread dump</h2>
+<p>Output dài hơn 100 dòng, vì JVM có nhiều thread nội bộ (GC, JIT...). Đừng hoảng. Chỉ cần tìm hai chỗ.</p>
+
+<h3>Chỗ 1: thread mang tên của bạn</h3>
+<div class="expect"><pre><code>"<span class="hl">chuyen-A-sang-B</span>" #28 ... waiting for monitor entry
+   java.lang.Thread.State: <span class="bad-hl">BLOCKED</span> (on object monitor)
+	at Deadlock.lambda$main$0(<span class="hl">Deadlock.java:15</span>)
+	- waiting to lock &lt;0x000000062e014888&gt; (a java.lang.Object)
+	- locked &lt;0x000000062e014878&gt; (a java.lang.Object)</code></pre></div>
+<p>Đọc từng dòng:</p>
+<ol class="flow">
+  <li><code>"chuyen-A-sang-B"</code>: tên thread. Đây là lý do nên đặt tên cho thread.</li>
+  <li><code>State: BLOCKED</code>: thread đang <strong>đứng chờ để vào một khối synchronized</strong>, tức là đang chờ chìa khoá.</li>
+  <li><code>at ...(Deadlock.java:15)</code>: thread đang dừng ở <strong>dòng 15</strong> của file. Đó chính là dòng <code>synchronized (taiKhoanB)</code>.</li>
+  <li><code>waiting to lock &lt;...888&gt;</code>: <strong>đang chờ</strong> khoá của object có địa chỉ kết thúc bằng 888 (<code>taiKhoanB</code>).</li>
+  <li><code>locked &lt;...878&gt;</code>: <strong>đang giữ</strong> khoá của object có địa chỉ kết thúc bằng 878 (<code>taiKhoanA</code>).</li>
+</ol>
+<p>Thread kia thì ngược lại: giữ <code>...888</code> và chờ <code>...878</code>. Ghép hai thông tin lại là thấy ngay vòng chờ.</p>
+
+<h3>Chỗ 2: JVM tự phát hiện deadlock</h3>
+<p>Kéo xuống cuối output, JVM đã làm hộ bạn phần khó nhất:</p>
+<div class="expect"><pre><code><span class="bad-hl">Found one Java-level deadlock:</span>
+=============================
+"chuyen-A-sang-B":
+  waiting to lock monitor ... (object 0x000000062e014888, a java.lang.Object),
+  which is held by "chuyen-B-sang-A"
+
+"chuyen-B-sang-A":
+  waiting to lock monitor ... (object 0x000000062e014878, a java.lang.Object),
+  which is held by "chuyen-A-sang-B"
+...
+Found 1 deadlock.</code></pre></div>
+<p>Dịch ra: <em>"chuyen-A-sang-B chờ một khoá đang bị chuyen-B-sang-A giữ, và chuyen-B-sang-A chờ một khoá đang bị chuyen-A-sang-B giữ."</em> Đúng y như câu chuyện hai nhân viên.</p>
+<p>Xong rồi thì quay lại Terminal 1, bấm <strong>Ctrl + C</strong> để tắt chương trình.</p>
+
+<h3>Các trạng thái thread hay gặp</h3>
+<table>
+  <tr><th>Trạng thái</th><th>Nghĩa</th><th>Ví dụ</th></tr>
+  <tr><td><code>RUNNABLE</code></td><td>Đang chạy, hoặc sẵn sàng chạy</td><td>Đang tính toán, đang đọc dữ liệu mạng</td></tr>
+  <tr><td><code>BLOCKED</code></td><td>Đang chờ để vào khối <code>synchronized</code></td><td>Thread trong bài này</td></tr>
+  <tr><td><code>WAITING</code></td><td>Chờ không giới hạn thời gian, tới khi thread khác báo</td><td><code>join()</code>, chờ việc trong thread pool</td></tr>
+  <tr><td><code>TIMED_WAITING</code></td><td>Chờ có giới hạn thời gian</td><td><code>Thread.sleep(100)</code></td></tr>
+</table>
+<p>Nguồn: <a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.State.html">Thread.State Javadoc</a>.</p>
+
+<div class="remember">
+Ứng dụng <strong>treo</strong> (request không bao giờ trả về, CPU gần 0%) → chụp thread dump: <code>jps</code> để lấy PID, rồi <code>jcmd &lt;PID&gt; Thread.print</code>.<br>
+Tìm dòng <code>Found one Java-level deadlock</code>, hoặc tìm <strong>nhiều thread BLOCKED cùng chờ một khoá</strong>.
+</div>
+
+<h2>6 · Khi đi làm thì sao?</h2>
+<p>Ở production, deadlock thường lộ ra theo kiểu: hệ thống đang chạy bình thường, đột nhiên một số API <strong>không trả lời nữa</strong> (timeout), trong khi CPU lại rất thấp. Restart thì hết, vài ngày sau lại bị. Quy trình xử lý:</p>
+<ol class="flow">
+  <li><strong>Trước khi restart</strong>, chụp 2–3 thread dump, mỗi lần cách nhau vài giây. Restart xong là mất hết bằng chứng.</li>
+  <li>Tìm <code>Found one Java-level deadlock</code>. Nếu không có, so các lần dump với nhau: thread nào đứng yên ở cùng một dòng code qua mọi lần chụp thì đó là thread đang kẹt.</li>
+  <li>Đọc stack trace để biết thread đó kẹt ở dòng code nào, và đang chờ khoá do ai giữ.</li>
+</ol>
+<p>Ứng dụng Spring Boot có bật Actuator còn có sẵn endpoint <code>/actuator/threaddump</code> để lấy thread dump qua HTTP.<a class="cite" href="https://docs.spring.io/spring-boot/reference/actuator/endpoints.html">[Spring Boot: Actuator Endpoints]</a></p>
+
+<h2>7 · Cách phòng tránh: khoá theo cùng một thứ tự</h2>
+<p>Deadlock trong bài xảy ra vì hai thread khoá <strong>ngược thứ tự</strong> nhau (A rồi B, và B rồi A). Quy tắc đơn giản nhất: <strong>mọi thread đều phải lấy các khoá theo cùng một thứ tự</strong>. Ví dụ, luôn khoá A trước rồi mới tới B.</p>
+<div class="analogy">Công ty đặt quy định: "Ai cần cả hai chìa thì <strong>luôn phải lấy chìa A trước</strong>." Khi đó, ai đang cầm chìa A thì không ai khác cầm được chìa A, nên cũng không ai có thể đang giữ chìa B mà đứng chờ chìa A. Vòng chờ không bao giờ hình thành.</div>
+
+<div class="callout"><strong>Câu phỏng vấn: "Deadlock là gì? Phát hiện và phòng tránh thế nào?"</strong>
+<p><em>"Deadlock là khi hai hay nhiều thread chờ nhau theo vòng tròn: mỗi thread giữ một khoá và chờ khoá đang bị thread khác giữ, nên không thread nào đi tiếp được. Để phát hiện, tôi chụp thread dump bằng <code>jcmd &lt;pid&gt; Thread.print</code> (hoặc <code>jstack</code>). JVM sẽ tự báo 'Found one Java-level deadlock' kèm danh sách thread và khoá liên quan. Để phòng tránh: luôn lấy khoá theo cùng một thứ tự, giữ khoá càng ngắn càng tốt, tránh gọi code bên ngoài khi đang giữ khoá, hoặc dùng <code>tryLock</code> có timeout."</em></p></div>
+
+<h2>8 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q11"></div>
+<script type="application/json" id="q11">[
+ {"q":"Deadlock khác race condition (bài 10) ở điểm nào?",
+  "options":["Deadlock làm chương trình đứng im mãi","Deadlock chỉ xảy ra với một thread","Deadlock luôn ném ra một exception","Deadlock làm kết quả tính toán bị sai"],
+  "answer":0,"why":"Race condition: chạy xong nhưng ra kết quả sai. Deadlock: các thread chờ nhau vòng tròn nên đứng im, không lỗi, không log, không tốn CPU."},
+ {"q":"Trong thread dump, một thread có <code>State: BLOCKED</code>. Nghĩa là gì?",
+  "options":["Thread đã chạy xong và bị JVM xoá","Thread đang ngủ do gọi Thread.sleep","Thread đang chờ vào khối synchronized","Thread bị lỗi và ném ra một exception"],
+  "answer":2,"why":"<code>BLOCKED</code> nghĩa là thread đang chờ lấy khoá để vào khối/method <code>synchronized</code>. <code>Thread.sleep</code> thì cho trạng thái <code>TIMED_WAITING</code>."},
+ {"q":"API production thỉnh thoảng treo, CPU gần 0%. Việc nên làm <strong>đầu tiên</strong> là gì?",
+  "options":["Restart ngay để người dùng dùng được","Tăng -Xmx để JVM có thêm bộ nhớ","Bật -Xint để tắt JIT cho an toàn","Chụp vài thread dump trước khi restart"],
+  "answer":3,"why":"Restart xong là mất hết bằng chứng. Chụp 2–3 thread dump (<code>jcmd &lt;pid&gt; Thread.print</code>) trước, rồi mới restart. Sau đó tìm deadlock hoặc thread bị kẹt."},
+ {"q":"Hai thread cần cùng lúc khoá A và khoá B. Cách nào chắc chắn tránh được deadlock?",
+  "options":["Cho thread chạy sau ngủ thêm 1 giây","Mọi thread đều khoá A trước, rồi tới B","Đổi hai khoá thành biến kiểu static","Thêm volatile vào cả hai biến khoá"],
+  "answer":1,"why":"Deadlock cần một vòng chờ. Nếu mọi thread lấy khoá theo cùng một thứ tự thì vòng chờ không thể hình thành. <code>sleep</code> chỉ làm lỗi khó xuất hiện hơn chứ không hết lỗi."},
+ {"q":"(Ôn bài 10) Vì sao <code>count++</code> trên một biến dùng chung bị mất dữ liệu khi có nhiều thread?",
+  "options":["Vì JVM chỉ cho một thread đọc biến static","Vì count++ chạy trên stack của thread khác","Vì count++ gồm đọc, cộng, ghi, bị chen ngang","Vì GC chạy giữa chừng và xoá giá trị cũ"],
+  "answer":2,"why":"<code>count++</code> = <code>getstatic</code> → <code>iadd</code> → <code>putstatic</code>. Hai thread có thể cùng đọc một giá trị cũ rồi cùng ghi một kết quả, nên mất một lần tăng."}
+]</script>
+
+<h2>9 · Thử thách: sửa deadlock</h2>
+<div class="lab">
+<p><strong>Nhiệm vụ:</strong> sửa <code>Deadlock.java</code> sao cho chương trình chạy tới cuối và in ra cả hai dòng "xong". Không được xoá bất kỳ khối <code>synchronized</code> nào: cả hai thread vẫn phải giữ <strong>cả hai</strong> khoá khi "chuyển tiền".</p>
+<p>Gợi ý: nhìn lại mục 7. Bạn chỉ cần sửa thread <code>chuyen-B-sang-A</code>.</p>
+<details><summary>Xem lời giải</summary>
+<p>Cho thread thứ hai cũng khoá <code>taiKhoanA</code> trước, rồi mới tới <code>taiKhoanB</code>:</p>
+<pre><code>Thread t2 = new Thread(() -&gt; {
+    synchronized (taiKhoanA) {          // đổi: luôn khoá A trước
+        System.out.println("chuyen-B-sang-A: đã khoá A, chờ khoá B...");
+        nghi();
+        synchronized (taiKhoanB) {      // rồi mới tới B
+            System.out.println("chuyen-B-sang-A: xong");
+        }
+    }
+}, "chuyen-B-sang-A");</code></pre>
+<div class="expect"><pre><code>chuyen-A-sang-B: đã khoá A, chờ khoá B...
+PID của chương trình: 510055
+chuyen-A-sang-B: xong
+chuyen-B-sang-A: đã khoá A, chờ khoá B...
+chuyen-B-sang-A: xong</code></pre></div>
+<p>Thread 2 phải đợi thread 1 trả chìa A rồi mới bắt đầu, nhưng không bao giờ bị kẹt vĩnh viễn. Ngoài đời, với ví dụ chuyển tiền, người ta thường quy định "luôn khoá tài khoản có <strong>mã số nhỏ hơn</strong> trước", để thứ tự khoá không phụ thuộc vào chiều chuyển tiền.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: deadlock mà JVM không tự phát hiện được</summary>
+<p>Dòng <code>Found one Java-level deadlock</code> chỉ xuất hiện khi các thread chờ nhau qua <code>synchronized</code> hoặc các lock trong gói <code>java.util.concurrent</code>. Ngoài đời còn có những kiểu "kẹt" mà JVM không thể tự nhận ra:</p>
+<ul>
+  <li><strong>Hết connection trong pool:</strong> mọi thread đều đang chờ lấy connection database, nhưng các connection lại đang bị chính những thread đó giữ mà không trả. Trong thread dump, bạn sẽ thấy hàng chục thread ở trạng thái <code>WAITING</code>/<code>TIMED_WAITING</code> với stack trace dừng ở cùng một chỗ trong thư viện connection pool (ví dụ HikariCP).</li>
+  <li><strong>Gọi mạng không đặt timeout:</strong> thread <code>RUNNABLE</code> nhưng đứng mãi ở một lệnh đọc socket.</li>
+</ul>
+<p>Kỹ năng chung cho mọi trường hợp: <strong>chụp nhiều thread dump, tìm những thread đứng yên ở cùng một dòng code qua các lần chụp</strong>. Đó là nơi cần điều tra.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/essential/concurrency/deadlock.html">Oracle Java Tutorial: Deadlock</a>, một trang ngắn với ví dụ hai người cúi chào nhau. Để học các công cụ chẩn đoán (<code>jcmd</code>, <code>jstack</code>, heap dump...) thì đọc <a href="https://docs.oracle.com/en/java/javase/21/troubleshoot/diagnostic-tools.html">Oracle JDK 21 Troubleshooting Guide: Diagnostic Tools</a>. Chương 10 "Avoiding Liveness Hazards" trong <em>Java Concurrency in Practice</em> là tài liệu sâu nhất về deadlock.</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "PID là gì?", "WAITING khác BLOCKED thế nào?", "tryLock là gì?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0010-race-condition.html">← Bài 10: Race condition</a><a href="0012-proxy-va-reflection.html">Bài 12: Proxy và reflection →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Volatile và JMM</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Đã tắt cờ rồi, sao thread kia vẫn chạy mãi?</h1>
+<p class="subtitle">Bài 13 · Vấn đề "nhìn thấy" (visibility), từ khoá <code>volatile</code>, và quy tắc happens-before của Java Memory Model</p>
+<div class="meta"><span>~35 phút</span><span>Cần biết: <a href="0006-jit-warm-up.html">Bài 6</a> (JIT), <a href="0010-race-condition.html">Bài 10</a> (thread), <a href="0011-deadlock-thread-dump.html">Bài 11</a> (thread dump)</span><span>Thư mục thực hành: <code>lab/l0013</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Tự tạo ra một chương trình <strong>treo vĩnh viễn</strong> chỉ vì một thread "không nhìn thấy" giá trị thread khác đã ghi.</li>
+  <li>Sửa được bằng <code>volatile</code>, và biết <code>volatile</code> <strong>không</strong> sửa được gì.</li>
+  <li>Giải thích được <strong>happens-before</strong> bằng lời thường. Đây là câu phỏng vấn concurrency nâng cao.</li>
+</ul>
+
+<h2>1 · Ôn bài 10 (trả lời trong đầu trước)</h2>
+<div class="callout">Ở bài 10, hai thread cùng chạy <code>count++</code> thì mất dữ liệu. Vấn đề đó tên là gì, và nguyên nhân là gì?
+<details><summary>Kiểm tra</summary><strong>Race condition</strong>: <code>count++</code> gồm ba bước đọc → cộng → ghi, và hai thread chen ngang giữa các bước. Phần "Đào sâu" của bài 10 có nhắc tới một vấn đề <em>khác</em>: thread này ghi mà thread kia <strong>không nhìn thấy</strong>. Hôm nay ta tận mắt thấy nó.</details></div>
+
+<h2>2 · Thí nghiệm: cờ đã tắt mà không ai dừng</h2>
+<p>Mở <code>lab/l0013/StopFlag.java</code>. Ý tưởng rất đơn giản: thread <code>worker</code> chạy vòng lặp chừng nào cờ <code>running</code> còn bật. Nửa giây sau, <code>main</code> tắt cờ rồi chờ worker dừng.</p>
+<pre><code>static boolean running = true;          // cờ báo "tiếp tục chạy"
+
+// thread worker:
+while (running) {                       // cứ chạy khi cờ còn bật
+    count++;
+}
+System.out.println("worker: thấy cờ tắt, dừng lại ...");
+
+// thread main:
+Thread.sleep(500);                      // cho worker chạy nửa giây
+running = false;                        // main tắt cờ
+worker.join();                          // chờ worker kết thúc
+System.out.println("main: xong!");</code></pre>
+<p><strong>Đoán trước:</strong> sau khoảng nửa giây, chương trình có in "main: xong!" không?</p>
+<p>Ta chạy kèm <code>timeout 5</code>, nghĩa là "nếu sau 5 giây vẫn chưa xong thì giết chương trình", để khỏi phải đợi mãi:</p>
+<pre><code>cd lab/l0013
+javac *.java
+timeout 5 java StopFlag; echo "exit=$?"</code></pre>
+<div class="expect"><pre><code>main: đã tắt cờ, chờ worker dừng...
+exit=124</code></pre>
+<p style="margin:0"><code>exit=124</code> nghĩa là chương trình bị <code>timeout</code> giết sau 5 giây. Không có dòng "worker: thấy cờ tắt", không có "main: xong!". Chạy bao nhiêu lần cũng vậy.</p></div>
+<p>Main đã gán <code>running = false</code> rõ ràng như vậy, nhưng worker <strong>không bao giờ nhìn thấy</strong>.</p>
+
+<h2>3 · Vì sao? Hai thủ phạm</h2>
+
+<div class="analogy">
+<p>Một nhân viên kho được dặn: "Cứ đóng hàng, chừng nào <strong>tấm biển ở văn phòng</strong> còn ghi MỞ CỬA". Đi ra văn phòng xem biển rất mất thời gian, nên anh ta <strong>chép chữ trên biển vào một mẩu giấy trong túi</strong>, rồi từ đó chỉ nhìn mẩu giấy.</p>
+<p>Giám đốc lật biển sang ĐÓNG CỬA. Mẩu giấy trong túi vẫn ghi MỞ CỬA, nên nhân viên cứ đóng hàng mãi.</p>
+</div>
+
+<p>Trong máy tính có hai "mẩu giấy trong túi" như vậy:</p>
+<ol class="flow">
+  <li><strong>JIT tối ưu (bài 6):</strong> JIT thấy trong vòng lặp không có ai ghi vào <code>running</code>, nên nó "tối ưu" bằng cách <strong>đọc <code>running</code> một lần duy nhất</strong> rồi lặp mãi. Code JIT tạo ra tương đương với <code>if (running) while (true) count++;</code>.</li>
+  <li><strong>Cache của CPU:</strong> mỗi lõi CPU có bộ nhớ đệm riêng. Giá trị một lõi vừa ghi không nhất thiết được lõi khác thấy ngay.</li>
+</ol>
+<p>Bằng chứng cho thủ phạm thứ nhất: tắt JIT bằng <code>-Xint</code> rồi chạy lại.</p>
+<pre><code>timeout 5 java -Xint StopFlag; echo "exit=$?"</code></pre>
+<div class="expect"><pre><code>main: đã tắt cờ, chờ worker dừng...
+worker: thấy cờ tắt, dừng lại sau 89668745 vòng
+main: xong!
+exit=0</code></pre></div>
+<p>Không có JIT thì interpreter đọc lại <code>running</code> ở mỗi vòng lặp, nên thấy cờ tắt. Nhưng đừng vì thế mà nghĩ "lỗi tại JIT". Theo luật của Java, JIT <strong>được phép</strong> tối ưu như vậy, vì code không hề nói cho JVM biết biến này được dùng chung giữa nhiều thread.</p>
+
+<h3>Thread dump của một chương trình treo kiểu này</h3>
+<p>Nối với bài 11: chụp thread dump lúc chương trình đang treo (<code>jps</code>, rồi <code>jcmd &lt;PID&gt; Thread.print</code>), bạn sẽ thấy:</p>
+<div class="expect"><pre><code>"main" ...
+   java.lang.Thread.State: WAITING (on object monitor)      ← đang chờ join()
+"worker" ... <span class="hl">cpu=650.08ms elapsed=0.65s</span>
+   java.lang.Thread.State: <span class="bad-hl">RUNNABLE</span>
+	at StopFlag.lambda$main$0(StopFlag.java:8)              ← kẹt trong vòng lặp</code></pre></div>
+<p>Khác với deadlock ở bài 11 (thread <code>BLOCKED</code>, CPU gần 0%), ở đây worker là <code>RUNNABLE</code> và đốt CPU liên tục: cpu 650 ms trong 0,65 giây, tức 100% một lõi. <strong>"Treo mà CPU 100%"</strong> là dấu hiệu của vòng lặp không thoát được, và thread dump chỉ ra đúng dòng code.</p>
+
+<h2>4 · Cách sửa: <code>volatile</code></h2>
+<p>Mở <code>StopFlagVolatile.java</code>. Khác biệt duy nhất là một từ khoá:</p>
+<pre><code>static <span class="hl">volatile</span> boolean running = true;</code></pre>
+<pre><code>timeout 5 java StopFlagVolatile; echo "exit=$?"</code></pre>
+<div class="expect"><pre><code>main: đã tắt cờ, chờ worker dừng...
+worker: thấy cờ tắt, dừng lại sau 1478437341 vòng
+main: xong!
+exit=0</code></pre></div>
+<p><code>volatile</code> nói với JVM: <em>"biến này được nhiều thread dùng chung. Mỗi lần đọc phải đọc giá trị mới nhất, không được giữ bản sao trong túi."</em><a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.3.1.4">[JLS §8.3.1.4]</a> Trong câu chuyện, nhân viên bị bắt phải <strong>ra văn phòng nhìn biển mỗi lần</strong>.</p>
+
+<h2>5 · Happens-before: quy tắc "ai nhìn thấy gì"</h2>
+<p>Luật chính thức quy định thread nào nhìn thấy giá trị nào gọi là <span class="term">Java Memory Model</span> (JMM).<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.4">[JLS §17.4]</a> Khái niệm trung tâm của nó là <span class="term">happens-before</span>:</p>
+<div class="remember">Nếu hành động X <strong>happens-before</strong> hành động Y, thì mọi thứ đã ghi trước X đều <strong>chắc chắn được nhìn thấy</strong> ở Y.<br>
+Nếu không có quan hệ happens-before nào, thì <strong>không có gì đảm bảo</strong>: thread kia có thể thấy giá trị cũ mãi mãi, như bạn vừa thấy.</div>
+
+<p>Bạn không cần thuộc hết các quy tắc. Chỉ cần nhớ mấy quy tắc hay dùng nhất, trích nguyên văn từ JLS §17.4.5:<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.4.5">[JLS §17.4.5]</a></p>
+<table>
+  <tr><th>Quy tắc (JLS)</th><th>Nói đơn giản</th></tr>
+  <tr><td><em>"A write to a volatile field happens-before every subsequent read of that field."</em></td><td>Ghi vào biến <code>volatile</code> thì thread đọc sau đó chắc chắn thấy.</td></tr>
+  <tr><td><em>"An unlock on a monitor happens-before every subsequent lock on that monitor."</em></td><td>Thread ra khỏi khối <code>synchronized</code>, thì thread vào sau (cùng khoá) thấy hết những gì nó đã ghi. Đây là lý do <code>synchronized</code> ở bài 10 sửa được cả vấn đề "nhìn thấy".</td></tr>
+  <tr><td><em>"A call to start() on a thread happens-before any actions in the started thread."</em></td><td>Những gì gán trước <code>t.start()</code> thì thread <code>t</code> chắc chắn thấy.</td></tr>
+</table>
+<p>Ngoài ra còn một quy tắc tương tự cho <code>join()</code>: khi <code>join()</code> trả về, thread chờ thấy hết những gì thread kia đã ghi.</p>
+
+<h2>6 · <code>volatile</code> KHÔNG sửa được race condition</h2>
+<p>Đây là bẫy phỏng vấn kinh điển. Mở <code>VolatileCount.java</code>: y hệt <code>Race.java</code> ở bài 10, chỉ thêm <code>volatile</code> vào <code>count</code>.</p>
+<pre><code>static volatile int count = 0;
+// 2 thread, mỗi thread count++ 100 000 lần</code></pre>
+<pre><code>java VolatileCount</code></pre>
+<div class="expect"><pre><code>Mong đợi: 200000, thực tế: 132661</code></pre></div>
+<p>Vẫn mất dữ liệu. <code>volatile</code> chỉ đảm bảo mỗi lần <em>đọc</em> thấy giá trị mới nhất, nhưng <code>count++</code> vẫn là ba bước đọc → cộng → ghi, và hai thread vẫn chen ngang được giữa các bước.</p>
+
+<table>
+  <tr><th>Vấn đề</th><th><code>volatile</code></th><th><code>synchronized</code></th><th><code>AtomicInteger</code> / <code>AtomicBoolean</code></th></tr>
+  <tr><td>Nhìn thấy giá trị mới (visibility)</td><td>Có</td><td>Có</td><td>Có</td></tr>
+  <tr><td>Không bị chen ngang (atomic, chống race condition)</td><td class="bad-hl">Không</td><td>Có</td><td>Có (cho từng thao tác)</td></tr>
+  <tr><td>Dùng cho</td><td>Cờ bật/tắt, một thread ghi nhiều thread đọc</td><td>Nhiều bước phải đi cùng nhau</td><td>Đếm, cập nhật một giá trị</td></tr>
+</table>
+
+<div class="callout"><strong>Câu phỏng vấn: "volatile dùng để làm gì? Nó có thay được synchronized không?"</strong>
+<p><em>"<code>volatile</code> đảm bảo <strong>visibility</strong>: một lần ghi vào biến volatile happens-before mọi lần đọc sau đó, nên các thread luôn thấy giá trị mới nhất, và JIT không được giữ bản sao của biến. Nó hợp với cờ dừng, hoặc trường hợp một thread ghi nhiều thread đọc. Nhưng <code>volatile</code> <strong>không đảm bảo tính atomic</strong>, nên <code>count++</code> trên biến volatile vẫn bị race condition. Lúc đó cần <code>synchronized</code> hoặc <code>AtomicInteger</code>. <code>synchronized</code> đảm bảo cả hai: chỉ một thread vào một lúc, và unlock happens-before lock tiếp theo."</em></p></div>
+
+<h2>7 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q13"></div>
+<script type="application/json" id="q13">[
+ {"q":"Vì sao worker trong <code>StopFlag.java</code> (không có volatile) chạy mãi dù main đã gán <code>running = false</code>?",
+  "options":["Vì main ghi sai biến, phải ghi this.running","Vì worker có thể không bao giờ thấy giá trị mới","Vì vòng lặp while không bao giờ đọc lại biến","Vì GC đã xoá mất biến running khỏi bộ nhớ"],
+  "answer":1,"why":"Không có quan hệ happens-before nào giữa lần ghi của main và lần đọc của worker, nên JIT được phép đọc <code>running</code> một lần rồi lặp mãi (với <code>-Xint</code> thì lỗi không xảy ra). Worker không bao giờ thấy giá trị mới."},
+ {"q":"Thêm <code>volatile</code> vào <code>static int count</code>, rồi hai thread cùng <code>count++</code>. Kết quả thế nào?",
+  "options":["Luôn đúng, vì volatile làm count++ an toàn","Lỗi biên dịch, vì int không thể là volatile","Vẫn mất dữ liệu, vì count++ vẫn bị chen ngang","Chương trình treo, vì volatile khoá biến lại"],
+  "answer":2,"why":"<code>volatile</code> chỉ lo visibility, không làm <code>count++</code> (đọc → cộng → ghi) thành atomic. Thí nghiệm ra ~132 000 thay vì 200 000. Phải dùng <code>AtomicInteger</code> hoặc <code>synchronized</code>."},
+ {"q":"Ứng dụng treo. Thread dump cho thấy một thread <code>RUNNABLE</code> và CPU đang 100% một lõi. Nghi ngờ hợp lý nhất là gì?",
+  "options":["Một vòng lặp không thoát được, ví dụ cờ không volatile","Deadlock giữa hai thread cùng giữ khoá","Thread đang ngủ vì đã gọi Thread.sleep","Thread đang chờ join một thread khác xong"],
+  "answer":0,"why":"Deadlock thì thread <code>BLOCKED</code>, CPU gần 0%. <code>RUNNABLE</code> kèm CPU 100% nghĩa là thread đang chạy vòng lặp mãi; thread dump chỉ ra đúng dòng code. Cờ dừng thiếu <code>volatile</code> là một nguyên nhân kinh điển."},
+ {"q":"Theo JMM, điều gì đảm bảo thread vào khối <code>synchronized(lock)</code> sau sẽ thấy dữ liệu thread trước đã ghi trong cùng khối?",
+  "options":["Biến bên trong khối tự động được làm volatile","Unlock của thread trước happens-before lock sau","JIT luôn tắt tối ưu bên trong khối synchronized","Cả hai thread luôn chạy chung một lõi CPU"],
+  "answer":1,"why":"JLS §17.4.5: <em>\"An unlock on a monitor happens-before every subsequent lock on that monitor.\"</em> Nhờ quy tắc này, <code>synchronized</code> đảm bảo cả visibility lẫn atomic."},
+ {"q":"(Ôn bài 6) Vì sao chạy <code>StopFlag</code> với <code>-Xint</code> thì worker lại dừng được?",
+  "options":["Vì -Xint tự thêm volatile cho mọi biến","Vì -Xint chạy mọi thread trên cùng một lõi","Vì -Xint tắt GC nên biến không bị dọn","Vì không có JIT nên mỗi vòng đều đọc lại biến"],
+  "answer":3,"why":"<code>-Xint</code> chỉ thông dịch, không JIT. Interpreter đọc lại <code>running</code> mỗi vòng nên thấy cờ tắt. Nhưng đây không phải cách sửa: code đúng phải có happens-before (ví dụ <code>volatile</code>)."}
+]</script>
+
+<h2>8 · Thử thách: sửa mà không dùng chữ <code>volatile</code></h2>
+<div class="lab">
+<p><strong>Nhiệm vụ:</strong> sửa <code>StopFlag.java</code> để worker dừng đúng lúc, nhưng <strong>không được dùng từ khoá <code>volatile</code></strong>. Gợi ý: ở bài 10 bạn đã dùng <code>AtomicInteger</code>. Có một class tương tự cho kiểu <code>boolean</code>.</p>
+<pre><code>timeout 5 java StopFlag; echo "exit=$?"     # mục tiêu: exit=0 và in "main: xong!"</code></pre>
+<details><summary>Xem lời giải</summary>
+<pre><code>import java.util.concurrent.atomic.AtomicBoolean;
+...
+static AtomicBoolean running = new AtomicBoolean(true);
+...
+while (running.get()) { count++; }     // worker đọc
+...
+running.set(false);                      // main ghi</code></pre>
+<div class="expect"><pre><code>main: đã tắt cờ, chờ worker dừng...
+worker: thấy cờ tắt, dừng lại sau 1118335043 vòng
+main: xong!
+exit=0</code></pre></div>
+<p><code>AtomicBoolean.get()</code> và <code>set()</code> có cùng hiệu ứng nhìn thấy như đọc và ghi một biến <code>volatile</code>.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/atomic/package-summary.html">[java.util.concurrent.atomic]</a> Ngoài ra nó còn có những thao tác atomic như <code>compareAndSet</code>. Một cách khác là đọc và ghi cờ bên trong <code>synchronized</code>, theo quy tắc unlock happens-before lock.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: double-checked locking và "object chưa khởi tạo xong"</summary>
+<p>Visibility còn gây ra một lỗi khó hơn: thread khác có thể nhìn thấy <strong>tham chiếu</strong> tới một object trước khi nhìn thấy các <strong>field</strong> đã được constructor gán xong. Ví dụ kinh điển là mẫu singleton "double-checked locking":</p>
+<pre><code>private static Helper instance;              // thiếu volatile → có thể lỗi
+static Helper get() {
+    if (instance == null) {                  // đọc lần 1, ngoài khoá
+        synchronized (Helper.class) {
+            if (instance == null) instance = new Helper();
+        }
+    }
+    return instance;                         // có thể trả về object "chưa xong"
+}</code></pre>
+<p>Thread đọc <code>instance</code> ở dòng đầu (ngoài khoá) không có quan hệ happens-before với lần ghi bên trong khoá, nên có thể thấy object với các field vẫn còn giá trị mặc định. Cách sửa là khai báo <code>private static volatile Helper instance;</code>. Hoặc đơn giản hơn: dùng khởi tạo static (bài 5), vốn đã được JVM đảm bảo an toàn khi có nhiều thread.</p>
+<p>Muốn đi sâu nữa thì đọc bài của Aleksey Shipilëv (kỹ sư HotSpot): <a href="https://shipilev.net/blog/2016/close-encounters-of-jmm-kind/">Close Encounters of The Java Memory Model Kind</a>. Bài dài và khó, nhưng là nguồn đáng tin nhất về JMM.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/essential/concurrency/atomic.html">Oracle Java Tutorial: Atomic Access</a> (ngắn, giải thích <code>volatile</code> và happens-before). Tiếp theo là chương 3 "Sharing Objects" (mục 3.1 Visibility) trong <em>Java Concurrency in Practice</em>, tài liệu dễ hiểu nhất về đề tài này. Định nghĩa gốc nằm ở <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.4">JLS chương 17.4</a> (rất khó, chỉ để tra cứu).</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "có nên đánh dấu mọi biến là volatile cho chắc không?", "happens-before có nghĩa là xảy ra trước về mặt thời gian không?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0012-proxy-va-reflection.html">← Bài 12: Proxy và reflection</a><a href="0014-thread-pool.html">Bài 14: Thread pool →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

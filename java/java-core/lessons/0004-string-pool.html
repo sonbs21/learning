@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>String pool</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Vì sao <code>"hi" == "hi"</code> lại đúng, còn <code>new String("hi")</code> thì không?</h1>
+<p class="subtitle">Bài 4 · String pool, tính bất biến (immutable), và một bug rất hay gặp khi đi làm</p>
+<div class="meta"><span>~30 phút</span><span>Cần biết: <a href="0001-tu-source-den-bytecode.html">Bài 1</a> (javac, chạy chương trình)</span><span>Thư mục thực hành: <code>lab/l0004</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Giải thích được vì sao <code>==</code> với String lúc ra <code>true</code>, lúc ra <code>false</code>.</li>
+  <li>Hiểu <span class="term">String pool</span> là gì và vì sao String <strong>không sửa được</strong>.</li>
+  <li>Không bao giờ mắc bug so sánh String bằng <code>==</code> nữa.</li>
+</ul>
+
+<h2>1 · Ôn lại nhanh: biến giữ cái gì?</h2>
+<p>Trước khi nói về String, cần nhớ lại một điều: với object (String cũng là một object), <strong>biến không chứa object</strong>. Biến chỉ chứa một <strong>"tờ giấy ghi vị trí"</strong> của object.</p>
+
+<div class="analogy">
+<p>Object giống một <strong>tấm bảng</strong> treo trên tường. Biến giống một <strong>tờ giấy</strong> ghi "tấm bảng ở ô số 7".</p>
+<p>Hai biến có thể là hai tờ giấy khác nhau nhưng cùng ghi "ô số 7", tức là cùng chỉ tới <em>một</em> tấm bảng.</p>
+</div>
+
+<p>Từ đó có hai cách so sánh:</p>
+<table>
+  <tr><th>Cách so sánh</th><th>Câu hỏi nó trả lời</th></tr>
+  <tr><td><code>a == b</code></td><td>"Hai tờ giấy có chỉ tới <strong>cùng một tấm bảng</strong> không?"</td></tr>
+  <tr><td><code>a.equals(b)</code></td><td>"Chữ viết trên hai tấm bảng có <strong>giống nhau</strong> không?"</td></tr>
+</table>
+<p>Tờ giấy ghi vị trí đó có tên chính thức là <span class="term">tham chiếu</span> (reference). Từ giờ ta dùng từ này.</p>
+
+<h2>2 · Đoán trước, rồi chạy thử</h2>
+<p>Mở file <code>Pool.java</code>:</p>
+<pre><code>String a = "hi";
+String b = "hi";
+String c = new String("hi");
+
+System.out.println("1. a == b      : " + (a == b));
+System.out.println("2. a == c      : " + (a == c));
+System.out.println("3. a.equals(c) : " + a.equals(c));</code></pre>
+<p>Cả ba biến đều chứa chữ <code>"hi"</code>. <strong>Hãy đoán</strong> ba dòng in ra là <code>true</code> hay <code>false</code>, ghi ra giấy, rồi chạy:</p>
+<pre><code>cd lab/l0004
+javac Pool.java
+java Pool</code></pre>
+<div class="expect"><pre><code>1. a == b      : true
+2. a == c      : false
+3. a.equals(c) : true
+4. a == c.intern() : true</code></pre></div>
+<p>Dòng 3 dễ hiểu: chữ giống nhau thì <code>equals</code> ra <code>true</code>. Dòng 1 và 2 mới là điều lạ: <strong>vì sao <code>a == b</code> lại đúng, mà <code>a == c</code> thì sai?</strong> (Dòng 4 sẽ giải thích ở mục 4.)</p>
+
+<h2>3 · String pool: kệ chữ dùng chung</h2>
+
+<div class="analogy">
+<p>Một lớp học thường xuyên cần những tấm bảng ghi chữ "hi", "ok", "admin"... Nếu mỗi bạn cần chữ "hi" lại tự làm một tấm bảng mới thì lớp sẽ ngập bảng, rất phí.</p>
+<p>Vì vậy lớp làm một <strong>kệ chung</strong>. Ai cần chữ "hi" thì trước tiên nhìn lên kệ:</p>
+<ul>
+  <li>Kệ đã có tấm "hi" thì <strong>dùng luôn tấm đó</strong>, chỉ cần ghi vị trí của nó vào tờ giấy của mình.</li>
+  <li>Kệ chưa có thì làm một tấm mới, <strong>đặt lên kệ</strong>, rồi dùng.</li>
+</ul>
+</div>
+
+<p>Trong Java, cái kệ chung đó gọi là <span class="term">String pool</span>. Khi bạn viết một chuỗi trực tiếp trong code bằng dấu nháy kép, như <code>"hi"</code> (cách viết này gọi là <span class="term">string literal</span>), Java tự động dùng kệ chung.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-3.html#jls-3.10.5">[JLS §3.10.5]</a></p>
+
+<p>Giờ đi lại từng dòng code:</p>
+<ol class="flow">
+  <li><code>String a = "hi";</code>: Java nhìn kệ, chưa có "hi", nên tạo một tấm "hi" đặt lên kệ. Biến <code>a</code> ghi vị trí tấm đó.</li>
+  <li><code>String b = "hi";</code>: Java nhìn kệ, <strong>đã có</strong> "hi", nên <code>b</code> ghi <strong>cùng vị trí</strong> với <code>a</code>. Không có tấm mới nào được tạo.</li>
+  <li><code>String c = new String("hi");</code>: từ khoá <code>new</code> nghĩa là "<strong>làm cho tôi một tấm bảng MỚI</strong>, đừng lấy trên kệ". Vì vậy <code>c</code> chỉ tới một tấm khác, nằm ngoài kệ.</li>
+</ol>
+
+<div class="mem">
+  <div class="mem-col"><h4>Biến (tờ giấy)</h4>
+    <div class="frame"><div class="frame-name">main</div>
+      <div class="slot"><span>a</span><span class="ref">→ tấm #1</span></div>
+      <div class="slot"><span>b</span><span class="ref">→ tấm #1</span></div>
+      <div class="slot"><span>c</span><span class="ref">→ tấm #2</span></div>
+    </div>
+  </div>
+  <div class="mem-col"><h4>Các tấm bảng (object)</h4>
+    <div class="obj"><div class="obj-name">tấm #1 · trên kệ String pool</div><div class="slot"><span>chữ</span><span>"hi"</span></div></div>
+    <div class="obj"><div class="obj-name">tấm #2 · tạo bằng new, ngoài kệ</div><div class="slot"><span>chữ</span><span>"hi"</span></div></div>
+  </div>
+  <p class="mem-caption"><code>a</code> và <code>b</code> chỉ cùng một tấm, nên <code>a == b</code> là true. <code>c</code> chỉ tấm khác, nên <code>a == c</code> là false, dù chữ giống hệt nhau.</p>
+</div>
+
+<h2>4 · <code>intern()</code>: tự tay đặt lên kệ</h2>
+<p>Method <code>c.intern()</code> nghĩa là: "nhìn lên kệ xem có tấm nào chữ giống <code>c</code> không. Có thì đưa tôi vị trí tấm trên kệ." Kệ đã có tấm #1, nên <code>c.intern()</code> trả về tấm #1. Đó là lý do <code>a == c.intern()</code> ra <code>true</code>.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/String.html#intern()">[String.intern]</a></p>
+<p>Bạn hiếm khi phải tự gọi <code>intern()</code>. Chỉ cần biết nó tồn tại để hiểu cơ chế của kệ.</p>
+
+<h2>5 · Vì sao String không sửa được?</h2>
+<p>Quay lại cái kệ chung. Giả sử bạn A và bạn B cùng dùng tấm "hi" trên kệ. Nếu bạn A lấy bút <strong>sửa</strong> tấm đó thành "bye", thì bạn B cũng bị đổi theo mà không hề hay biết. Như vậy rất nguy hiểm.</p>
+
+<div class="analogy">
+<p>Cách giải quyết: mọi tấm bảng đều được <strong>ép plastic</strong>, không ai sửa được. Muốn chữ khác thì phải <strong>làm tấm mới</strong>.</p>
+</div>
+
+<p>Đó là lý do String trong Java là <span class="term">immutable</span> (bất biến): một khi đã tạo thì không thay đổi được nữa.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/String.html">[String Javadoc: "Strings are constant"]</a> Mọi method trông như "sửa" String, như <code>toUpperCase()</code>, <code>replace()</code>, <code>trim()</code>, thật ra đều <strong>tạo String mới</strong> và trả về String mới đó.</p>
+
+<p>Thử với <code>Immutable.java</code>. Đoán trước dòng 1 in ra gì:</p>
+<pre><code>String s = "hello";
+s.toUpperCase();                 // gọi nhưng không giữ kết quả
+System.out.println("1. s = " + s);
+
+String t = s.toUpperCase();      // giữ kết quả vào t
+System.out.println("2. t = " + t);
+System.out.println("3. s = " + s);</code></pre>
+<pre><code>javac Immutable.java
+java Immutable</code></pre>
+<div class="expect"><pre><code>1. s = hello
+2. t = HELLO
+3. s = hello</code></pre></div>
+<p>Dòng 1 vẫn là <code>hello</code>, vì <code>toUpperCase()</code> tạo ra tấm "HELLO" mới, nhưng không ai giữ tờ giấy ghi vị trí của nó. <code>s</code> vẫn chỉ tấm "hello" cũ. Đây là lỗi người mới hay mắc: gọi <code>s.trim()</code> rồi tưởng <code>s</code> đã được sửa.</p>
+
+<div class="remember">
+<ul style="margin:0">
+  <li>Chuỗi viết trong dấu nháy kép (<code>"hi"</code>) được lấy từ <strong>String pool</strong>. Chuỗi giống nhau thì dùng chung một object.</li>
+  <li><code>new String(...)</code> luôn tạo object <strong>mới</strong>, nằm ngoài pool.</li>
+  <li>String là <strong>immutable</strong>. Muốn giữ kết quả của <code>toUpperCase()</code>, <code>trim()</code>... thì phải gán vào biến.</li>
+</ul>
+</div>
+
+<h2>6 · Bug thật khi đi làm: so sánh String bằng <code>==</code></h2>
+<p>Đây là lý do quan trọng nhất của bài này. Xem <code>Login.java</code>:</p>
+<pre><code>String role = args[0];      // chữ do người dùng gõ vào lúc chạy
+System.out.println("role == \"admin\"      : " + (role == "admin"));
+System.out.println("role.equals(\"admin\") : " + role.equals("admin"));</code></pre>
+<pre><code>javac Login.java
+java Login admin</code></pre>
+<div class="expect"><pre><code>role == "admin"      : false
+role.equals("admin") : true</code></pre></div>
+<p>Người dùng gõ đúng chữ <code>admin</code>, vậy mà <code>==</code> lại ra <code>false</code>!</p>
+<p>Lý do: chữ đến từ <strong>bên ngoài chương trình</strong> (người dùng gõ, request HTTP, database, file...) được tạo ra lúc chạy, giống như dùng <code>new</code>. Nó <strong>không nằm trên kệ</strong>. Vì vậy nó là một object khác với <code>"admin"</code> trong code của bạn.</p>
+<p>Điều nguy hiểm là: lúc bạn tự test bằng chuỗi viết sẵn trong code, <code>==</code> có thể vẫn ra <code>true</code> (vì cả hai đều nằm trên kệ). Code "chạy được" trên máy bạn, rồi hỏng khi lên production với dữ liệu thật.</p>
+
+<div class="remember">So sánh <strong>nội dung</strong> String thì <strong>luôn dùng <code>.equals()</code></strong>, không bao giờ dùng <code>==</code>.</div>
+
+<div class="callout"><strong>Câu phỏng vấn: "String pool là gì? Vì sao String là immutable?"</strong>
+<p><em>"String pool là vùng nhớ nơi Java lưu các string literal. Các literal giống nhau dùng chung một object để tiết kiệm bộ nhớ. Vì nhiều biến có thể cùng chỉ tới một object, String phải là immutable: nếu sửa được thì sửa ở một chỗ sẽ làm hỏng mọi chỗ khác đang dùng chung. Đó cũng là lý do phải so sánh String bằng <code>equals</code>, vì <code>==</code> chỉ so xem có cùng object hay không."</em></p></div>
+
+<h2>7 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q4"></div>
+<script type="application/json" id="q4">[
+ {"q":"<code>String a = \"ok\"; String b = \"ok\";</code>. Có bao nhiêu object String chứa chữ \"ok\" được tạo ra?",
+  "options":["Hai object, mỗi biến một object","Không object nào, chỉ có hai biến","Một object, cả hai biến dùng chung","Ba object, thêm một bản trên kệ"],
+  "answer":2,"why":"Cả hai đều là string literal, nên dòng đầu tạo tấm \"ok\" và đặt lên kệ, dòng thứ hai dùng lại đúng tấm đó."},
+ {"q":"Vì sao <code>\"hi\" == new String(\"hi\")</code> ra <code>false</code>?",
+  "options":["Vì new tạo object mới nằm ngoài kệ","Vì chữ bên trong hai object khác nhau","Vì == không dùng được với kiểu String","Vì new String bị lỗi khi chạy chương trình"],
+  "answer":0,"why":"<code>new</code> luôn làm một tấm bảng mới. Chữ giống nhau, nhưng là hai tấm khác nhau, mà <code>==</code> thì hỏi \"có cùng một tấm không?\"."},
+ {"q":"<code>String s = \" hi \"; s.trim(); System.out.println(\"[\" + s + \"]\");</code> in ra gì?",
+  "options":["[hi], vì trim đã xoá dấu cách","[], vì trim xoá hết nội dung","Lỗi biên dịch, thiếu dấu gán","[ hi ], vì s vẫn là chuỗi cũ"],
+  "answer":3,"why":"String là immutable. <code>trim()</code> tạo ra chuỗi mới \"hi\" nhưng không ai giữ nó; <code>s</code> vẫn chỉ chuỗi cũ còn dấu cách. Phải viết <code>s = s.trim();</code>."},
+ {"q":"Kiểm tra mật khẩu người dùng gửi lên với chuỗi trong code. Nên viết thế nào?",
+  "options":["input == \"secret\" vì nhanh hơn","input.equals(\"secret\") để so nội dung","input.intern() == \"secret\" cho chắc","input.hashCode() == 123 cho gọn"],
+  "answer":1,"why":"Dữ liệu từ bên ngoài không nằm trên kệ, nên <code>==</code> sẽ ra false dù gõ đúng. Luôn dùng <code>equals</code> để so nội dung."},
+ {"q":"(Ôn bài 1) Lệnh nào biến file <code>Pool.java</code> thành file <code>Pool.class</code>?",
+  "options":["java Pool.java chạy trực tiếp","javap -v Pool để xem bên trong","javac Pool.java để biên dịch","jvm Pool để khởi động máy ảo"],
+  "answer":2,"why":"<code>javac</code> là trình biên dịch: nó dịch code bạn viết thành bytecode trong file <code>.class</code>. Sau đó <code>java Pool</code> mới chạy file đó."}
+]</script>
+
+<h2>8 · Thử thách: đoán 4 dòng</h2>
+<div class="lab">
+<p>Mở <code>Challenge.java</code>. <strong>Đoán từng dòng là true hay false trước khi chạy.</strong> Gợi ý nằm ngay dưới mỗi dòng.</p>
+<pre><code>String a = "hi";
+String h = "h";
+System.out.println("1. " + (a == "h" + "i"));
+System.out.println("2. " + (a == h + "i"));
+Integer x = 127, y = 127;
+Integer m = 128, n = 128;
+System.out.println("3. " + (x == y));
+System.out.println("4. " + (m == n));</code></pre>
+<ul>
+  <li>Dòng 1: <code>"h" + "i"</code> là hai chữ viết sẵn trong code. Theo bạn, <code>javac</code> có thể tự ghép chúng ngay lúc biên dịch không?</li>
+  <li>Dòng 2: <code>h</code> là một <em>biến</em>. Giá trị của biến chỉ được biết lúc chạy.</li>
+  <li>Dòng 3 và 4: <code>Integer</code> (chữ I viết hoa) là object, không phải số <code>int</code> thường. Java cũng có một "kệ chung" cho một số con số...</li>
+</ul>
+<pre><code>javac Challenge.java
+java Challenge</code></pre>
+<details><summary>Xem đáp án</summary>
+<div class="expect"><pre><code>1. true
+2. false
+3. true
+4. false</code></pre></div>
+<ul>
+  <li><strong>Dòng 1 (true):</strong> <code>"h" + "i"</code> gồm toàn chữ viết sẵn, nên <code>javac</code> ghép thành <code>"hi"</code> ngay lúc biên dịch. Kết quả là một literal bình thường, lấy từ kệ.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.29">[JLS §15.29]</a></li>
+  <li><strong>Dòng 2 (false):</strong> <code>h + "i"</code> có biến, nên phép ghép xảy ra lúc chạy và tạo object mới ngoài kệ (giống bug ở <code>Login.java</code>).</li>
+  <li><strong>Dòng 3 (true) và 4 (false):</strong> Java có sẵn một "kệ" cho các <code>Integer</code> từ <strong>-128 đến 127</strong>. 127 nằm trong khoảng nên dùng chung object; 128 nằm ngoài nên mỗi lần là một object mới.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-5.html#jls-5.1.7">[JLS §5.1.7]</a> Đây là bug thật: so sánh hai <code>Integer</code> (ví dụ hai ID lấy từ database) bằng <code>==</code> chạy đúng khi test với số nhỏ, rồi hỏng khi ID vượt 127. Bài học vẫn y như cũ: <strong>object thì so bằng <code>equals</code></strong>.</li>
+</ul>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: String pool nằm ở đâu trong bộ nhớ?</summary>
+<p>Từ Java 7, String pool nằm trong <strong>heap</strong>, vùng nhớ chung chứa mọi object. Vì vậy các String trên kệ cũng được dọn rác (GC) như object thường khi không ai dùng nữa. Trước Java 7, pool nằm ở một vùng riêng tên là "permanent generation" và hay gây lỗi hết bộ nhớ.<a class="cite" href="https://www.oracle.com/java/technologies/javase/jdk7-relnotes.html">[JDK 7 Release Notes]</a></p>
+<p>Ngoài việc cho phép dùng chung, tính immutable còn có lợi cho bảo mật và cho đa luồng: một String đã tạo thì không ai sửa được, nên nhiều thread đọc cùng lúc vẫn an toàn mà không cần khoá. Ta sẽ quay lại ý này ở bài về thread.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://dev.java/learn/numbers-strings/strings/">dev.java: Strings</a>. Đây là trang học chính thức của Oracle về String, dễ đọc, nhiều ví dụ. Muốn đọc định nghĩa gốc thì xem <a href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-3.html#jls-3.10.5">JLS §3.10.5 String Literals</a>.</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Bạn cũng có thể gửi kết quả quiz và đáp án đoán của thử thách (đoán đúng mấy dòng?) để bài sau được chỉnh cho vừa sức bạn.</p>
+
+<div class="footer-nav"><a href="0003-equals-hashcode.html">← Bài 3</a><a href="0005-static-chay-khi-nao.html">Bài 5: Static chạy khi nào →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

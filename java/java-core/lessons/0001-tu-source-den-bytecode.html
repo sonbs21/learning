@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Java chạy như thế nào</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Chuyện gì xảy ra khi bạn chạy một chương trình Java?</h1>
+<p class="subtitle">Bài 1 · Hiểu đường đi từ file code bạn viết đến lúc máy tính chạy nó</p>
+<div class="meta"><span>~30 phút</span><span>Cần biết: viết được một class Java đơn giản</span><span>Thư mục thực hành: <code>lab/l0001</code></span></div>
+
+<p>Mỗi ngày bạn bấm nút Run trong IDE và chương trình chạy. Nhưng giữa lúc bấm nút và lúc chữ hiện ra trên màn hình đã xảy ra mấy bước. Bài này đi qua từng bước một, chậm rãi, có ví dụ và có lệnh để bạn tự chạy và tự thấy.</p>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Kể lại được 3 bước để một chương trình Java chạy được.</li>
+  <li>Biết <code>javac</code>, <code>.class</code>, JVM là gì và mỗi thứ làm việc gì.</li>
+  <li>Trả lời được câu phỏng vấn: <em>"Java là ngôn ngữ biên dịch hay thông dịch?"</em></li>
+</ul>
+
+<h2>1 · Bắt đầu bằng một câu chuyện</h2>
+
+<div class="analogy">
+<p>Bạn là đầu bếp người Việt, viết một <strong>công thức nấu ăn bằng tiếng Việt</strong>. Bạn muốn công thức này được nấu ở nhà hàng tại Nhật, Mỹ và Pháp. Vấn đề là đầu bếp ở đó không đọc được tiếng Việt.</p>
+<p>Có hai cách giải quyết:</p>
+<ul>
+  <li><strong>Cách 1:</strong> Viết riêng 3 bản: tiếng Nhật, tiếng Anh, tiếng Pháp. Mỗi lần sửa công thức lại phải sửa cả 3 bản. Rất mệt.</li>
+  <li><strong>Cách 2:</strong> Dịch công thức <em>một lần</em> sang một <strong>"ngôn ngữ chung"</strong>. Nhà hàng nào cũng thuê sẵn một <strong>phiên dịch viên</strong> hiểu ngôn ngữ chung này. Phiên dịch viên đọc bản chung rồi nói lại cho đầu bếp địa phương bằng tiếng của họ.</li>
+</ul>
+<p>Java chọn <strong>cách 2</strong>.</p>
+</div>
+
+<p>Giờ ta ghép từng vai trong câu chuyện với thứ tương ứng trong Java:</p>
+<table>
+  <tr><th>Trong câu chuyện</th><th>Trong Java</th><th>Nó là gì</th></tr>
+  <tr><td>Công thức tiếng Việt</td><td><code>Hello.java</code></td><td>File code bạn viết. Người đọc được.</td></tr>
+  <tr><td>Người dịch sang ngôn ngữ chung</td><td><code>javac</code></td><td>Chương trình <strong>biên dịch</strong> (compiler) của Java.</td></tr>
+  <tr><td>Bản công thức ngôn ngữ chung</td><td><code>Hello.class</code></td><td>File chứa <span class="term">bytecode</span>, "ngôn ngữ chung" của Java.</td></tr>
+  <tr><td>Phiên dịch viên ở mỗi nhà hàng</td><td><strong>JVM</strong></td><td>Java Virtual Machine, chương trình chạy bytecode. Windows, Mac, Linux đều có bản JVM riêng.</td></tr>
+  <tr><td>Đầu bếp địa phương</td><td>CPU</td><td>Bộ xử lý của máy tính. Chỉ hiểu "mã máy" của riêng nó.</td></tr>
+</table>
+
+<div class="remember">Bạn chỉ viết code <strong>một lần</strong>. File <code>.class</code> giống nhau ở mọi máy. Cái khác nhau giữa các máy chỉ là JVM. Đây chính là khẩu hiệu nổi tiếng của Java: <em>"Write once, run anywhere"</em> (viết một lần, chạy mọi nơi).</div>
+
+<h2>2 · Tự làm từng bước</h2>
+<p>Mở terminal và đi theo từng bước dưới đây. Mỗi bước đều có phần "Bạn sẽ thấy" để bạn so với kết quả trên máy mình.</p>
+
+<h3>Bước 1: Xem file code (công thức tiếng Việt)</h3>
+<pre><code>cd lab/l0001
+cat Hello.java</code></pre>
+<div class="expect"><pre><code>public class Hello {
+    public static void main(String[] args) {
+        int a = 2;
+        int b = 3;
+        System.out.println("Tổng = " + (a + b));
+    }
+}</code></pre></div>
+<p>Đây là code bình thường, bạn đọc hiểu được. Nhưng <strong>CPU không đọc được</strong> file này.</p>
+
+<h3>Bước 2: Biên dịch bằng <code>javac</code> (dịch sang ngôn ngữ chung)</h3>
+<pre><code>javac Hello.java
+ls</code></pre>
+<div class="expect"><pre><code>Hello.class  Hello.java  Lazy.java</code></pre></div>
+<p>Có một file mới xuất hiện: <code>Hello.class</code>. Đó là kết quả của việc biên dịch. Thử mở nó ra xem:</p>
+<pre><code>cat Hello.class</code></pre>
+<div class="expect"><p>Một đống ký tự lạ, gần như không đọc được.</p></div>
+<p>Thấy ký tự lạ là <strong>đúng</strong>. File này không viết cho người đọc, mà viết cho JVM đọc. Nội dung bên trong là <span class="term">bytecode</span>: một danh sách lệnh rất đơn giản kiểu "đẩy số 2 vào", "đẩy số 3 vào", "cộng hai số lại".</p>
+
+<h3>Bước 3: Chạy bằng <code>java</code> (phiên dịch viên làm việc)</h3>
+<pre><code>java Hello</code></pre>
+<div class="expect"><pre><code>Tổng = 5</code></pre></div>
+<p>Chú ý: bạn gõ <code>java Hello</code>, <strong>không có</strong> đuôi <code>.java</code> hay <code>.class</code>. Lệnh <code>java</code> khởi động JVM. JVM sẽ tự đi tìm file <code>Hello.class</code>, rồi làm ba việc theo thứ tự:</p>
+<ol class="flow">
+  <li><strong>Nạp (load):</strong> tìm file <code>Hello.class</code> và đọc vào bộ nhớ. <em>Giống phiên dịch viên lấy bản công thức ra khỏi tủ.</em></li>
+  <li><strong>Kiểm tra (verify):</strong> xem bytecode có hợp lệ, có an toàn không. <em>Giống phiên dịch viên đọc lướt xem công thức có bước nào nguy hiểm hay viết sai không.</em></li>
+  <li><strong>Chạy (execute):</strong> dịch từng lệnh bytecode sang mã máy cho CPU làm. <em>Giống phiên dịch viên đọc từng bước công thức cho đầu bếp nấu.</em></li>
+</ol>
+
+<h2>3 · Phiên dịch viên thông minh: JIT</h2>
+<p>Ở bước "chạy", JVM có hai cách làm việc:</p>
+
+<div class="analogy">
+<p>Phiên dịch viên ban đầu <strong>dịch miệng</strong> từng câu một. Cách này bắt đầu nhanh, nhưng nếu một câu phải dịch đi dịch lại 10 000 lần thì rất phí công.</p>
+<p>Vì vậy phiên dịch viên để ý: câu nào được hỏi <em>rất nhiều lần</em> thì <strong>viết sẵn bản dịch ra giấy</strong>. Lần sau chỉ cần đưa tờ giấy, khỏi phải dịch lại.</p>
+</div>
+
+<ul>
+  <li><strong>Dịch miệng từng câu</strong> = <span class="term">thông dịch</span> (interpreter). Khởi động nhanh, nhưng chạy chậm.</li>
+  <li><strong>Viết sẵn bản dịch cho câu hay dùng</strong> = <span class="term">JIT</span> (Just-In-Time compiler). Đoạn code nào chạy nhiều lần sẽ được dịch hẳn sang mã máy, và từ đó chạy rất nhanh.</li>
+</ul>
+<p>Bạn có thể tự kiểm tra: gõ <code>java -version</code> và nhìn dòng cuối.</p>
+<div class="expect"><pre><code>OpenJDK 64-Bit Server VM (build 21...., <strong>mixed mode</strong>, sharing)</code></pre></div>
+<p><code>mixed mode</code> nghĩa là "chế độ kết hợp": JVM vừa thông dịch, vừa dùng JIT.</p>
+
+<div class="callout"><strong>Câu phỏng vấn: "Java là ngôn ngữ biên dịch hay thông dịch?"</strong>
+<p>Trả lời: <strong>cả hai</strong>. Có thể nói như sau:</p>
+<p><em>"Đầu tiên <code>javac</code> biên dịch code thành bytecode trong file <code>.class</code>. Khi chạy, JVM thông dịch bytecode đó. Đoạn nào chạy nhiều thì JIT biên dịch tiếp sang mã máy để chạy nhanh hơn."</em></p></div>
+
+<h2>4 · Một lỗi thật bạn sẽ gặp khi đi làm</h2>
+<p>Bản "ngôn ngữ chung" cũng có <strong>phiên bản</strong>. Mỗi đời Java mới có thể thêm từ mới vào ngôn ngữ chung. Xem phiên bản của file vừa tạo:</p>
+<pre><code>javap -v Hello | grep major</code></pre>
+<div class="expect"><pre><code>  major version: 65</code></pre></div>
+<p>Số <strong>65 nghĩa là Java 21</strong>. Mấy con số hay gặp: 52 = Java 8, 61 = Java 17, 65 = Java 21. (<code>javap</code> là công cụ có sẵn trong JDK để "soi" bên trong file <code>.class</code>.)</p>
+
+<div class="analogy">
+<p>Công thức viết bằng ngôn ngữ chung bản mới nhất, nhưng phiên dịch viên chỉ học bản cũ. Anh ta sẽ nói: "Tôi không đọc được bản này."</p>
+</div>
+<p>Trong Java, tình huống đó sinh ra lỗi <code>UnsupportedClassVersionError</code>. Ví dụ: bạn build code bằng Java 21 trên máy mình, rồi đem lên server chỉ cài Java 17. Cách sửa là cài đúng bản Java trên server, hoặc build cho bản Java cũ hơn.</p>
+
+<h2>5 · Tóm tắt</h2>
+<div class="remember">
+<ol style="margin:0">
+  <li>Bạn viết <code>Hello.java</code>, file code người đọc được.</li>
+  <li><code>javac</code> dịch nó thành <code>Hello.class</code>, file chứa bytecode (ngôn ngữ chung).</li>
+  <li><code>java</code> khởi động JVM. JVM nạp → kiểm tra → chạy bytecode, và dùng JIT để tăng tốc đoạn chạy nhiều.</li>
+</ol>
+</div>
+
+<h2>6 · Tự kiểm tra</h2>
+<p>Đừng nhìn lại bài khi làm. Nghĩ ra đáp án trong đầu trước rồi mới bấm chọn.</p>
+<div class="quiz" data-quiz="q1"></div>
+<script type="application/json" id="q1">[
+ {"q":"Trong câu chuyện nhà hàng, <strong>JVM</strong> đóng vai nào?",
+  "options":["Đầu bếp người Việt viết ra công thức","Phiên dịch viên ở mỗi nhà hàng","Bản công thức bằng ngôn ngữ chung","Đầu bếp địa phương nấu món ăn"],
+  "answer":1,"why":"JVM là phiên dịch viên: nó đọc bytecode (ngôn ngữ chung) rồi chuyển thành lệnh cho CPU (đầu bếp địa phương). Mỗi hệ điều hành có bản JVM riêng."},
+ {"q":"Sau khi chạy <code>javac Hello.java</code>, file mới nào xuất hiện?",
+  "options":["Hello.exe, chạy trực tiếp được","Hello.txt, chứa kết quả chạy","Hello.class, chứa bytecode","Hello.jvm, chứa máy ảo Java"],
+  "answer":2,"why":"<code>javac</code> tạo ra <code>Hello.class</code>. File này chứa bytecode, dành cho JVM đọc chứ không dành cho người đọc."},
+ {"q":"JIT làm việc gì?",
+  "options":["Dịch hẳn đoạn chạy nhiều sang mã máy","Kiểm tra file .class có an toàn không","Tìm file .class trên ổ cứng để nạp","Dịch file .java sang file .class"],
+  "answer":0,"why":"Giống phiên dịch viên viết sẵn bản dịch cho câu hay hỏi: đoạn code chạy nhiều được JIT dịch hẳn sang mã máy, nên lần sau chạy nhanh hơn."},
+ {"q":"Build bằng Java 21, chạy trên server Java 17. Chuyện gì xảy ra?",
+  "options":["Chạy bình thường, không có vấn đề gì","Chạy được nhưng chậm hơn bình thường","JVM tự nâng cấp lên Java 21 để chạy","Báo lỗi UnsupportedClassVersionError"],
+  "answer":3,"why":"File <code>.class</code> có phiên bản 65 (Java 21). JVM 17 chỉ hiểu tới bản 61, nên từ chối chạy và báo lỗi này."}
+]</script>
+
+<h2>7 · Thử thách nhỏ: JVM có nạp hết mọi thứ không?</h2>
+<div class="lab">
+<p>Mở file <code>Lazy.java</code>. Trong đó có hai class: <code>Lazy</code> và <code>Helper</code>. Class <code>Helper</code> <strong>chỉ được dùng</strong> khi bạn truyền thêm một chữ bất kỳ lúc chạy (ví dụ <code>java Lazy x</code>).</p>
+<p><strong>Câu hỏi:</strong> nếu chạy <code>java Lazy</code> (không thêm chữ nào), JVM có nạp <code>Helper</code> không? Hãy <strong>đoán trước</strong>, rồi chạy thử:</p>
+<pre><code>javac Lazy.java
+ls *.class
+java -Xlog:class+load Lazy   | grep -E ' (Lazy|Helper) '
+java -Xlog:class+load Lazy x | grep -E ' (Lazy|Helper) '</code></pre>
+<p>(<code>-Xlog:class+load</code> bảo JVM in ra mỗi lần nó nạp một class. <code>grep</code> lọc ra chỉ những dòng có chữ Lazy hoặc Helper.)</p>
+<details><summary>Xem đáp án</summary>
+<p>Lệnh <code>ls</code> cho thấy <em>cả hai</em> file <code>Lazy.class</code> và <code>Helper.class</code> đều có trên ổ cứng (mỗi class là một file riêng).</p>
+<p>Nhưng lần chạy không có chữ thì JVM <strong>chỉ nạp <code>Lazy</code></strong>. Lần chạy có chữ <code>x</code> thì mới thấy thêm dòng <code>Helper</code>.</p>
+<p>Kết luận: JVM <strong>lười</strong>. Nó chỉ nạp một class khi thật sự cần dùng tới. Giống phiên dịch viên không lấy hết công thức trong tủ ra, mà chỉ lấy đúng món đang được gọi.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: nhìn tận mắt bytecode</summary>
+<p>Lệnh <code>javap -c Hello</code> in bytecode ra dưới dạng đọc được. Đây là phần của hàm <code>main</code>, kèm giải thích:</p>
+<pre><code>iconst_2     // đẩy số 2 vào một "chồng đĩa" tạm
+istore_1     // lấy ra, cất vào biến a
+iconst_3     // đẩy số 3
+istore_2     // cất vào biến b
+iload_1      // đẩy a lên chồng
+iload_2      // đẩy b lên chồng
+iadd         // lấy 2 số trên cùng ra, cộng lại, đẩy kết quả lên</code></pre>
+<p>JVM tính toán bằng một "chồng đĩa" (gọi là <em>operand stack</em>): đặt số lên, lấy số xuống. Bạn chưa cần nhớ các lệnh này. Chỉ cần biết bytecode thật ra là một danh sách lệnh rất đơn giản như trên.</p>
+<p>Bạn cũng sẽ thấy một hàm <code>Hello()</code> mà bạn không hề viết. Đó là <em>constructor mặc định</em>: <code>javac</code> tự thêm vào cho mọi class không tự khai báo constructor.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.8.9">[JLS §8.8.9]</a></p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://dev.java/learn/getting-started/">dev.java: Getting Started with Java</a>. Đây là trang học chính thức của Oracle, viết dễ hiểu, có hướng dẫn biên dịch và chạy chương trình đầu tiên. Nếu muốn đọc tài liệu gốc thì xem <a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-1.html">JVM Specification, chương 1</a> (tiếng Anh, khó hơn).</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ nhất? Cứ hỏi agent (giáo viên của bạn) ngay. Ví dụ: "lệnh <code>ls</code> làm gì?", "JVM nằm ở đâu trên máy?"... Không có câu hỏi nào là ngớ ngẩn cả.</p>
+
+<div class="footer-nav"><a href="../reference/glossary.html">Glossary</a><a href="0002-stack-heap-pass-by-value.html">Bài 2 →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

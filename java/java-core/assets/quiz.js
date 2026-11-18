@@ -1,37 +1,60 @@
-// Quiz widget. Markup:
-// <div class="quiz" data-answer="1">          <- 0-based index of the correct option
-//   <p class="q">Question</p>
-//   <div class="opts"><button>A</button><button>B</button></div>
-//   <div class="explain">Shown after answering</div>
-// </div>
-// <div class="quiz-score"></div>               <- optional running score
+// Reusable quiz widget.
+// Usage: <div class="quiz" data-quiz="quiz-id"></div>
+//        <script type="application/json" id="quiz-id">[{ "q": "...", "options": ["..."], "answer": 0, "why": "..." }]</script>
+//        <script src="../assets/quiz.js"></script>
 (function () {
-  const quizzes = [...document.querySelectorAll(".quiz")];
-  const scoreEl = document.querySelector(".quiz-score");
-  let answered = 0, correct = 0;
+  const css = `
+  .quiz-q { border: 1px solid var(--rule); border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0; }
+  .quiz-q p { margin: 0 0 .6rem; }
+  .quiz-q button { display: block; width: 100%; text-align: left; margin: .35rem 0; padding: .5rem .7rem;
+    font: inherit; font-size: .95rem; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--rule); border-radius: 6px; cursor: pointer; }
+  .quiz-q button:hover:not(:disabled) { border-color: var(--accent); }
+  .quiz-q button.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .quiz-q button.bad { border-color: var(--bad); color: var(--bad); text-decoration: line-through; }
+  .quiz-why { display: none; font-size: .9rem; margin-top: .5rem; color: var(--muted); }
+  .quiz-q.done .quiz-why { display: block; }
+  .quiz-score { font-style: italic; color: var(--muted); }`;
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.appendChild(style);
 
-  function renderScore() {
-    if (!scoreEl) return;
-    scoreEl.textContent = answered === quizzes.length
-      ? `Kết quả: ${correct}/${quizzes.length} câu đúng${correct === quizzes.length ? " 🎯" : " — đọc lại phần giải thích các câu sai."}`
-      : `Đã trả lời ${answered}/${quizzes.length}`;
-  }
+  document.querySelectorAll(".quiz[data-quiz]").forEach((root) => {
+    const data = JSON.parse(document.getElementById(root.dataset.quiz).textContent);
+    let answered = 0, correct = 0;
+    const score = document.createElement("p");
+    score.className = "quiz-score";
 
-  quizzes.forEach((quiz) => {
-    const answer = Number(quiz.dataset.answer);
-    const buttons = [...quiz.querySelectorAll(".opts button")];
-    buttons.forEach((btn, i) => {
-      btn.type = "button";
-      btn.addEventListener("click", () => {
-        buttons.forEach((b) => (b.disabled = true));
-        buttons[answer].classList.add("correct");
-        if (i !== answer) btn.classList.add("wrong");
-        quiz.classList.add("answered");
-        answered++;
-        if (i === answer) correct++;
-        renderScore();
+    data.forEach((item, qi) => {
+      const box = document.createElement("div");
+      box.className = "quiz-q";
+      const p = document.createElement("p");
+      p.innerHTML = `<strong>${qi + 1}.</strong> ${item.q}`;
+      box.appendChild(p);
+
+      item.options.forEach((text, oi) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = text;
+        b.addEventListener("click", () => {
+          if (box.classList.contains("done")) return;
+          box.classList.add("done");
+          answered++;
+          if (oi === item.answer) correct++;
+          else b.classList.add("bad");
+          box.querySelectorAll("button")[item.answer].classList.add("ok");
+          box.querySelectorAll("button").forEach((x) => (x.disabled = true));
+          score.textContent = `Đúng ${correct}/${answered} (tổng ${data.length} câu)`;
+        });
+        box.appendChild(b);
       });
+
+      const why = document.createElement("div");
+      why.className = "quiz-why";
+      why.innerHTML = item.why;
+      box.appendChild(why);
+      root.appendChild(box);
     });
+    root.appendChild(score);
   });
-  renderScore();
 })();

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thread pool</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Đừng thuê đầu bếp mới cho mỗi món ăn</h1>
+<p class="subtitle">Bài 14 · Thread pool (<code>ExecutorService</code>): dùng lại thread, lấy kết quả bằng <code>Future</code>, và cái bẫy "quên shutdown"</p>
+<div class="meta"><span>~35 phút</span><span>Cần biết: <a href="0010-race-condition.html">Bài 10</a> (thread), <a href="0011-deadlock-thread-dump.html">Bài 11</a> (thread dump)</span><span>Thư mục thực hành: <code>lab/l0014</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Biết vì sao tạo thread mới cho mỗi việc là cách làm tệ, và dùng được <strong>thread pool</strong> thay thế.</li>
+  <li>Giao việc cho pool và lấy kết quả về bằng <code>Future</code>.</li>
+  <li>Tránh được bẫy "quên <code>shutdown()</code>", và hiểu thread pool của Tomcat/Spring Boot hoạt động thế nào.</li>
+</ul>
+
+<h2>1 · Ôn bài 11 (trả lời trong đầu trước)</h2>
+<div class="callout">Trong thread dump, trạng thái <code>WAITING</code> nghĩa là gì? Nó khác <code>BLOCKED</code> ở đâu?
+<details><summary>Kiểm tra</summary><code>WAITING</code>: thread đang chờ <em>có chủ đích</em> và không giới hạn thời gian, cho tới khi có thread khác báo (ví dụ <code>join()</code>, hoặc chờ việc mới). <code>BLOCKED</code>: thread đang chờ lấy khoá để vào khối <code>synchronized</code>. Hôm nay bạn sẽ gặp lại <code>WAITING</code> trong một tình huống rất hay gặp.</details></div>
+
+<h2>2 · Câu chuyện: nhà hàng và đầu bếp</h2>
+
+<div class="analogy">
+<p><strong>Cách 1, thuê đầu bếp mới cho mỗi món:</strong> mỗi khi có khách gọi món, nhà hàng đăng tuyển, ký hợp đồng, phát đồng phục cho một đầu bếp mới. Nấu xong món đó thì cho nghỉ việc. Thủ tục thuê và cho nghỉ mất thời gian hơn cả việc nấu. Hôm nào có 10 000 khách thì nhà hàng chật kín đầu bếp.</p>
+<p><strong>Cách 2, giữ một đội đầu bếp cố định:</strong> nhà hàng có sẵn 8 đầu bếp. Khách gọi món thì phiếu order được <strong>treo lên dây</strong>. Đầu bếp nào rảnh thì lấy phiếu kế tiếp ra nấu, xong lại lấy phiếu tiếp theo. Không ai phải thuê mới hay cho nghỉ.</p>
+</div>
+
+<table>
+  <tr><th>Trong câu chuyện</th><th>Trong Java</th></tr>
+  <tr><td>Đội 8 đầu bếp cố định</td><td><span class="term">Thread pool</span>: một nhóm thread được tạo sẵn và dùng đi dùng lại</td></tr>
+  <tr><td>Phiếu order</td><td>Một việc (task): <code>Runnable</code> hoặc <code>Callable</code></td></tr>
+  <tr><td>Dây treo phiếu</td><td>Hàng đợi (queue) bên trong pool</td></tr>
+  <tr><td>Quản lý nhà hàng</td><td><code>ExecutorService</code>: nơi bạn giao việc bằng <code>submit(...)</code></td></tr>
+</table>
+
+<h2>3 · Đo thật: 10 000 việc nhỏ</h2>
+<p><code>NewThreadEachTask.java</code> tạo <strong>một thread mới cho mỗi việc</strong> (cách 1). <code>Pool.java</code> dùng <strong>8 thread</strong> cho cả 10 000 việc (cách 2). Mỗi việc chỉ là tăng một biến đếm.</p>
+<pre><code>ExecutorService pool = Executors.newFixedThreadPool(8);   // 8 thread dùng đi dùng lại
+for (int i = 0; i &lt; 10_000; i++) {
+    pool.submit(done::incrementAndGet);                    // giao việc cho pool
+}
+pool.shutdown();                                           // không nhận việc mới nữa
+pool.awaitTermination(10, TimeUnit.SECONDS);               // chờ làm xong việc đã giao</code></pre>
+<p><strong>Đoán trước:</strong> cách nào nhanh hơn, và nhanh hơn khoảng bao nhiêu lần?</p>
+<pre><code>cd lab/l0014
+javac *.java
+java NewThreadEachTask
+java Pool</code></pre>
+<div class="expect"><pre><code>Thread mới cho mỗi việc: 10000 việc, 347 ms
+Thread pool 8 thread:   10000 việc, 17 ms</code></pre></div>
+<p>Thread pool nhanh hơn khoảng <strong>17–20 lần</strong>. Tạo một thread rất tốn kém: JVM phải xin hệ điều hành một thread thật, cấp cho nó một stack riêng (bài 2), rồi dọn dẹp khi thread kết thúc. Với việc nhỏ, chi phí "thuê và cho nghỉ" lớn hơn cả chi phí làm việc.</p>
+
+<h3>Ai làm việc nào?</h3>
+<p><code>WhoDoesIt.java</code>: pool 3 thread, giao 6 việc, mỗi việc in ra tên thread đang làm nó:</p>
+<pre><code>java WhoDoesIt</code></pre>
+<div class="expect"><pre><code>Việc 2 do pool-1-thread-2 làm
+Việc 1 do pool-1-thread-1 làm
+Việc 3 do pool-1-thread-3 làm
+Việc 4 do pool-1-thread-1 làm
+Việc 5 do pool-1-thread-2 làm
+Việc 6 do pool-1-thread-3 làm</code></pre>
+<p style="margin:0">(Thứ tự trên máy bạn có thể khác.)</p></div>
+<p>Chỉ có 3 thread (<code>pool-1-thread-1/2/3</code>), mỗi thread làm 2 việc. Đây chính là "đầu bếp nấu xong lại lấy phiếu tiếp". Tên <code>pool-1-thread-N</code> cũng là cái tên bạn sẽ thấy rất nhiều trong thread dump ở production.</p>
+
+<h2>4 · Lấy kết quả về: <code>Future</code></h2>
+<p>Nếu việc có kết quả trả về, <code>submit</code> sẽ trả cho bạn một <span class="term"><code>Future</code></span>, giống như một <strong>tờ phiếu hẹn</strong>: "kết quả chưa có ngay, khi nào cần thì cầm phiếu này đến lấy".</p>
+<pre><code>ExecutorService pool = Executors.newFixedThreadPool(2);
+Future&lt;Long&gt; f1 = pool.submit(() -&gt; tinhTong(1_000_000));   // giao việc, nhận phiếu hẹn
+Future&lt;Long&gt; f2 = pool.submit(() -&gt; tinhTong(2_000_000));
+System.out.println("main: đã giao 2 việc, làm việc khác trong lúc chờ...");
+System.out.println("Kết quả 1 = " + f1.get());   // get(): chờ tới khi có kết quả
+System.out.println("Kết quả 2 = " + f2.get());
+pool.shutdown();</code></pre>
+<pre><code>java FutureDemo</code></pre>
+<div class="expect"><pre><code>main: đã giao 2 việc, làm việc khác trong lúc chờ...
+Kết quả 1 = 500000500000
+Kết quả 2 = 2000001000000</code></pre></div>
+<p>Hai việc chạy <strong>song song</strong> trên hai thread của pool. <code>main</code> vẫn tiếp tục làm việc khác, và chỉ dừng lại chờ khi gọi <code>get()</code>.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/Future.html">[Future Javadoc]</a></p>
+
+<div class="remember">
+<code>ExecutorService pool = Executors.newFixedThreadPool(n);</code> → <code>pool.submit(việc)</code> → (nếu cần kết quả) <code>future.get()</code> → <strong>luôn luôn</strong> <code>pool.shutdown()</code> khi dùng xong.
+</div>
+
+<h2>5 · Bẫy: quên <code>shutdown()</code></h2>
+<p>Mở <code>ForgotShutdown.java</code>:</p>
+<pre><code>ExecutorService pool = Executors.newFixedThreadPool(2);
+pool.submit(() -&gt; System.out.println("việc đã làm xong"));
+System.out.println("main: hết hàm main rồi!");
+// QUÊN pool.shutdown()</code></pre>
+<p><strong>Đoán trước:</strong> hàm <code>main</code> chạy hết rồi, việc cũng đã làm xong. Chương trình có tự thoát không?</p>
+<pre><code>timeout 5 java ForgotShutdown; echo "exit=$?"</code></pre>
+<div class="expect"><pre><code>main: hết hàm main rồi!
+việc đã làm xong
+exit=124</code></pre></div>
+<p>Không thoát, và bị <code>timeout</code> giết sau 5 giây. Chụp thread dump lúc đó (bài 11: <code>jps</code>, rồi <code>jcmd &lt;PID&gt; Thread.print</code>):</p>
+<div class="expect"><pre><code>"pool-1-thread-1" ...
+   java.lang.Thread.State: <span class="hl">WAITING (parking)</span>
+	...
+	at java.util.concurrent.<span class="hl">LinkedBlockingQueue.take</span>(LinkedBlockingQueue.java:435)
+	at java.util.concurrent.ThreadPoolExecutor.<span class="hl">getTask</span>(ThreadPoolExecutor.java:1070)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1130)</code></pre></div>
+<ul>
+  <li>Thread <code>main</code> <strong>không còn</strong> trong dump, vì nó đã chạy xong.</li>
+  <li>Nhưng <code>pool-1-thread-1</code> vẫn sống, ở trạng thái <code>WAITING</code>, đứng ở <code>LinkedBlockingQueue.take</code> / <code>getTask</code>, tức là <strong>đang chờ phiếu order mới trên dây</strong>.</li>
+  <li>JVM chỉ tự thoát khi mọi thread "thường" (non-daemon) đều đã kết thúc. Thread của pool là thread thường, và chúng sẽ chờ việc mới mãi mãi.</li>
+</ul>
+<div class="analogy">Nhà hàng hết khách, quản lý ra về, nhưng quên báo "hết giờ làm". Các đầu bếp cứ đứng cạnh dây treo phiếu chờ order mới, và nhà hàng không thể khoá cửa.</div>
+<p>Javadoc viết rõ: <em>"An unused ExecutorService should be shut down to allow reclamation of its resources."</em><a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ExecutorService.html">[ExecutorService Javadoc]</a> Từ Java 19, <code>ExecutorService</code> dùng được với <code>try (...) { }</code>: hết khối <code>try</code> thì pool tự đóng và chờ mọi việc làm xong.</p>
+
+<h2>6 · Khi đi làm thì sao?</h2>
+<ul>
+  <li><strong>Tomcat chính là một thread pool.</strong> Spring Boot mặc định cho Tomcat tối đa <strong>200</strong> worker thread (<code>server.tomcat.threads.max</code>).<a class="cite" href="https://docs.spring.io/spring-boot/appendix/application-properties/index.html">[Spring Boot: application properties]</a> Mỗi request được một thread trong pool phục vụ. Nếu cả 200 thread đều đang bận chờ một API chậm hay một database chậm, request thứ 201 phải xếp hàng, và người dùng thấy hệ thống "treo". Thread dump lúc đó sẽ toàn là các thread tên <code>http-nio-8080-exec-N</code> đứng chờ ở cùng một chỗ.</li>
+  <li><strong>Hàng đợi không giới hạn:</strong> <code>Executors.newFixedThreadPool</code> dùng một hàng đợi không giới hạn (Javadoc: <em>"operating off a shared unbounded queue"</em>).<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/Executors.html">[Executors Javadoc]</a> Nếu việc được giao vào nhanh hơn tốc độ làm, hàng đợi cứ phình ra mãi, cho tới khi gặp <code>OutOfMemoryError</code> (bài 7). Ở production, người ta thường tự tạo <code>ThreadPoolExecutor</code> với hàng đợi có giới hạn.</li>
+</ul>
+
+<div class="callout"><strong>Câu phỏng vấn: "Vì sao nên dùng thread pool thay vì new Thread?"</strong>
+<p><em>"Tạo thread tốn kém, vì phải xin thread từ hệ điều hành và cấp stack riêng. Thread pool tạo sẵn một số thread cố định rồi dùng lại cho nhiều việc. Việc mới được đặt vào hàng đợi, thread nào rảnh thì lấy ra làm. Như vậy vừa nhanh hơn, vừa giới hạn được số thread để không làm sập máy. Dùng qua <code>ExecutorService</code>: <code>submit</code> trả về <code>Future</code> để lấy kết quả, và phải <code>shutdown()</code> khi dùng xong, nếu không các thread của pool giữ JVM sống mãi. Cần chú ý <code>newFixedThreadPool</code> dùng hàng đợi không giới hạn, nên có thể gây hết bộ nhớ nếu việc dồn quá nhiều."</em></p></div>
+
+<h2>7 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q14"></div>
+<script type="application/json" id="q14">[
+ {"q":"Vì sao 10 000 việc nhỏ chạy bằng thread pool lại nhanh hơn nhiều so với tạo thread mới cho mỗi việc?",
+  "options":["Vì pool tự động bật thêm nhiều lõi CPU","Vì pool dùng lại thread, khỏi tạo và huỷ","Vì pool bỏ qua các việc nhỏ cho nhanh","Vì pool chạy mọi việc trên thread main"],
+  "answer":1,"why":"Tạo và huỷ thread rất tốn kém (xin thread từ hệ điều hành, cấp stack). Pool tạo sẵn vài thread rồi dùng lại chúng cho mọi việc. Trong thí nghiệm: ~17 ms so với ~340 ms."},
+ {"q":"Hàm <code>main</code> chạy xong, nhưng chương trình không thoát. Thread dump có <code>pool-1-thread-1</code> đang <code>WAITING</code> ở <code>LinkedBlockingQueue.take</code>. Nguyên nhân là gì?",
+  "options":["Deadlock giữa main và thread của pool","Việc giao cho pool chưa chạy xong","Quên gọi shutdown() nên pool chờ việc mãi","Thiếu volatile nên pool không thấy cờ dừng"],
+  "answer":2,"why":"Thread của pool là thread thường. Không gọi <code>shutdown()</code> thì chúng đứng chờ việc mới trong hàng đợi mãi mãi, và JVM không thoát được."},
+ {"q":"<code>Future&lt;Long&gt; f = pool.submit(...)</code>. Gọi <code>f.get()</code> thì sao?",
+  "options":["Chờ tới khi việc xong rồi trả kết quả","Trả về ngay null nếu việc chưa xong","Huỷ việc đang chạy rồi trả kết quả cũ","Chạy lại việc đó một lần nữa trên main"],
+  "answer":0,"why":"<code>get()</code> làm thread gọi nó đứng chờ cho tới khi việc hoàn thành, rồi trả về kết quả. Trong lúc chưa gọi <code>get()</code>, main được tự do làm việc khác."},
+ {"q":"Spring Boot mặc định có 200 thread Tomcat. Cả 200 thread đều đang chờ một API bên ngoài rất chậm. Request mới sẽ thế nào?",
+  "options":["Được phục vụ ngay bằng thread thứ 201","Bị JVM tự chuyển sang chạy trên main","Làm JVM sập ngay vì OutOfMemoryError","Phải xếp hàng chờ có thread rảnh"],
+  "answer":3,"why":"Pool có giới hạn. Hết thread rảnh thì request mới vào hàng đợi, nên người dùng thấy chậm hoặc treo. Thread dump sẽ cho thấy các thread <code>http-nio-...-exec-N</code> cùng đứng chờ một chỗ."},
+ {"q":"(Ôn bài 13) Vì sao <code>volatile</code> không làm <code>count++</code> trở nên an toàn khi có nhiều thread?",
+  "options":["Vì volatile chỉ dùng được cho boolean","Vì count++ vẫn gồm đọc, cộng, ghi riêng","Vì volatile làm biến chạy chậm đi nhiều","Vì JIT luôn bỏ qua từ khoá volatile"],
+  "answer":1,"why":"<code>volatile</code> chỉ đảm bảo visibility (luôn đọc giá trị mới). <code>count++</code> vẫn là ba bước nên vẫn bị chen ngang. Phải dùng <code>AtomicInteger</code> hoặc <code>synchronized</code>."}
+]</script>
+
+<h2>8 · Thử thách: sửa <code>ForgotShutdown.java</code> bằng hai cách</h2>
+<div class="lab">
+<p><strong>Nhiệm vụ:</strong> sửa <code>ForgotShutdown.java</code> sao cho <code>timeout 5 java ForgotShutdown; echo "exit=$?"</code> in ra <code>exit=0</code>. Hãy làm bằng <strong>hai cách</strong>:</p>
+<ol>
+  <li>Thêm một dòng gọi <code>shutdown()</code>.</li>
+  <li>Không gọi <code>shutdown()</code>, mà dùng <code>try (ExecutorService pool = ...) { ... }</code> (Java 19+).</li>
+</ol>
+<details><summary>Xem lời giải</summary>
+<p><strong>Cách 1:</strong></p>
+<pre><code>ExecutorService pool = Executors.newFixedThreadPool(2);
+pool.submit(() -&gt; System.out.println("việc đã làm xong"));
+System.out.println("main: hết hàm main rồi!");
+pool.shutdown();       // không nhận việc mới; thread của pool kết thúc sau khi làm xong việc cũ</code></pre>
+<p><strong>Cách 2:</strong></p>
+<pre><code>try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+    pool.submit(() -&gt; System.out.println("việc đã làm xong"));
+    System.out.println("main: hết khối try rồi!");
+}   // tự gọi close(): shutdown + chờ mọi việc xong</code></pre>
+<p>Cả hai cách đều cho <code>exit=0</code>. Cách 2 an toàn hơn, vì nếu code trong khối <code>try</code> ném exception thì pool vẫn được đóng.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: virtual thread (Java 21), khi việc chủ yếu là chờ</summary>
+<p>Phần lớn thời gian của một request backend là <strong>chờ</strong>: chờ database, chờ API khác. Với pool 200 thread, 200 việc đang chờ là pool đầy. Java 21 có <span class="term">virtual thread</span>: những "thread nhẹ" do JVM quản lý, rất rẻ, tạo hàng triệu cái cũng được. Khi một virtual thread đứng chờ, nó nhường thread thật cho việc khác.<a class="cite" href="https://openjdk.org/jeps/444">[JEP 444: Virtual Threads]</a></p>
+<p>Thử 10 000 việc, mỗi việc "chờ" 100 ms (<code>Thread.sleep</code> giả lập chờ database):</p>
+<pre><code>java SleepPool    # pool cố định 200 thread
+java Virtual      # Executors.newVirtualThreadPerTaskExecutor()</code></pre>
+<div class="expect"><pre><code>Pool 200 thread: 10000 việc (mỗi việc chờ 100 ms), 5021 ms
+Virtual threads: 10000 việc (mỗi việc chờ 100 ms), 211 ms</code></pre></div>
+<p>Pool 200 thread chỉ chạy được 200 việc một lúc: 10 000 / 200 = 50 lượt × 100 ms ≈ 5 giây. Virtual thread cho cả 10 000 việc cùng chờ một lúc, nên chỉ mất khoảng 0,2 giây. Lưu ý: virtual thread chỉ giúp với việc <strong>chờ</strong> (I/O). Với việc <strong>tính toán nặng</strong> thì số lõi CPU vẫn là giới hạn. Spring Boot 3.2+ có thể bật virtual thread cho Tomcat. Bạn sẽ gặp lại chủ đề này ở khoá Spring.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/essential/concurrency/pools.html">Oracle Java Tutorial: Thread Pools</a> và các trang Executors liền kề. Ngắn và dễ đọc. Đọc sâu hơn: chương 6 "Task Execution" và chương 8 "Applying Thread Pools" trong <em>Java Concurrency in Practice</em>. Về virtual thread: <a href="https://openjdk.org/jeps/444">JEP 444</a>.</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "nên chọn pool bao nhiêu thread?", "Runnable khác Callable thế nào?", "daemon thread là gì?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0013-volatile-jmm.html">← Bài 13: Volatile và JMM</a><a href="0015-final.html">Bài 15: Từ khoá final →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

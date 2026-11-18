@@ -1,19 +1,22 @@
-# Mission: Java Core — hiểu tới bản chất
+# Mission: Java core đến tận bản chất JVM
 
 ## Why
-Mình dưới 1 năm kinh nghiệm Java và muốn hiểu *bên dưới chạy thế nào*, không chỉ cách dùng. Mục tiêu là vượt được vòng phỏng vấn kỹ thuật Java backend, đồng thời debug và đọc hiểu code thật (Spring, thư viện) tự tin hơn.
+Trở thành backend Java engineer giải thích được "Java chạy thế nào và tại sao": tự tin khi phỏng vấn, debug được lỗi production (memory leak, deadlock, chậm, OOM), và có nền vững để hiểu Spring (proxy, reflection, class loading).
 
 ## Success looks like
-- Giải thích được bằng lời và sơ đồ chuyện gì xảy ra trong bộ nhớ (stack, heap) khi chạy một đoạn code bất kỳ
-- Trả lời sâu, có dẫn chứng, các câu trong `../core/phong-van.md`: primitive và reference, `==` và `equals`, HashMap, String, pass-by-value, JVM memory/GC, thread và `synchronized`/`volatile`
-- Đoán đúng output của các câu đố Java "bẫy" trước khi chạy
-- Đọc được bytecode cơ bản (`javap -c`) để kiểm chứng điều mình hiểu
+- Giải thích được từ `.java` → bytecode → class loading → interpreter/JIT, và chứng minh bằng `javap`, `-Xlog`.
+- Vẽ được bộ nhớ JVM (stack, heap, metaspace) và dự đoán object nằm đâu, khi nào bị GC thu.
+- Trả lời đúng các câu bẫy: pass-by-value, `==` vs `equals`, `hashCode` contract, String pool, autoboxing.
+- Hiểu HashMap/ArrayList từ bên trong, chọn đúng collection theo độ phức tạp.
+- Đọc được thread dump / heap dump / GC log; giải thích Java Memory Model, `volatile`, `synchronized`, happens-before.
+- Hiểu reflection, dynamic proxy, annotation — đủ để thấy Spring "làm phép" thế nào.
 
 ## Constraints
-- Không có deadline, học lâu dài và đào sâu
-- Hình thức: giải thích bản chất, kèm quiz và code chạy thử (JDK 21 có sẵn trên máy)
-- Học bằng tiếng Việt, thuật ngữ giữ tiếng Anh
+- Đã viết được Java (class, interface, collection, OOP cơ bản) nhưng chưa hiểu sâu bên dưới.
+- Mỗi bài: HTML ngắn + code Java chạy thật trong `./lab/` + quiz.
+- Môi trường: OpenJDK 21 (Ubuntu), dùng công cụ JDK sẵn có (`javac`, `javap`, `jcmd`, `jstack`...).
 
-## Out of scope
-- Spring/framework (có thư mục `../spring` riêng); chỉ nhắc tới khi cần minh hoạ ứng dụng
-- Tuning GC chuyên sâu cho production, khi chưa vững nền tảng
+## Out of scope (hiện tại)
+- Spring (có workspace riêng `../java-spring/`).
+- GUI (Swing/JavaFX), Java EE cũ.
+- Viết JVM/compiler riêng.
