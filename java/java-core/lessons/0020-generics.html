@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generics và type erasure</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Generics: nhãn dán chỉ tồn tại lúc biên dịch</h1>
+<p class="subtitle">Bài 20 · Vì sao <code>List&lt;String&gt;</code> và <code>List&lt;Integer&gt;</code> là cùng một class lúc chạy, vì sao <code>List&lt;Integer&gt;</code> không phải là <code>List&lt;Number&gt;</code>, và khi nào dùng <code>? extends</code> / <code>? super</code></p>
+<div class="meta"><span>~45 phút</span><span>Cần biết: <a href="0007-overriding-overloading.html">Bài 7</a> (overload), <a href="0010-arraylist-ben-trong.html">Bài 10</a> (ArrayList), <a href="0018-interface-abstract-access.html">Bài 18</a> (interface)</span><span>Thư mục thực hành: <code>lab/l0020</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Giải thích được <strong>type erasure</strong> và chứng minh nó bằng code chạy thật.</li>
+  <li>Hiểu vì sao <code>List&lt;Integer&gt;</code> không gán được cho <code>List&lt;Number&gt;</code>, trong khi mảng thì được (và vì sao mảng làm vậy là nguy hiểm).</li>
+  <li>Viết đúng chữ ký method với <code>? extends</code> và <code>? super</code> theo quy tắc <strong>PECS</strong>.</li>
+</ul>
+
+<h2>1 · Ôn bài 10 và bài 7 (trả lời trong đầu trước)</h2>
+<div class="callout">
+<p>(a) Bên trong <code>ArrayList&lt;String&gt;</code>, dữ liệu được cất trong một mảng kiểu gì?</p>
+<p>(b) Overload được chọn bởi ai, lúc nào, dựa vào cái gì?</p>
+<details><summary>Kiểm tra</summary>(a) <code>Object[]</code>, chứ không phải <code>String[]</code>. Lạ nhỉ? Mục 3 sẽ giải thích. (b) Compiler, lúc biên dịch, dựa vào kiểu khai báo. Hôm nay bạn gặp lại ý "compiler lo hết lúc biên dịch, lúc chạy JVM không biết gì" ở dạng mới.</details></div>
+
+<h2>2 · Không có generics thì khổ thế nào?</h2>
+<div class="analogy">
+<p>Hình dung một kho có những chiếc hộp <strong>không dán nhãn</strong>. Ai muốn bỏ gì vào cũng được. Tới lúc lấy ra, bạn đoán "chắc là cà phê" rồi pha luôn, và chỉ phát hiện đó là muối khi đã uống.</p>
+<p><strong>Generics là dán nhãn lên hộp:</strong> "hộp này chỉ đựng cà phê". Người giữ kho (compiler) kiểm tra nhãn ngay lúc bỏ đồ vào, nên lúc lấy ra bạn không phải đoán nữa.</p>
+</div>
+<p>Trước Java 5 chưa có generics, list chỉ là "hộp không nhãn". <code>KhongGeneric.java</code> viết theo kiểu cũ đó (gọi là <strong>raw type</strong>: dùng <code>List</code> trơn, không có <code>&lt;...&gt;</code>):</p>
+<pre><code>List ds = new ArrayList();          // "raw type": hộp không dán nhãn
+ds.add("cà phê");
+ds.add(42);                         // compiler không cản
+for (Object o : ds) {
+    String s = (String) o;          // tự ép kiểu lấy ra
+    System.out.println(s.toUpperCase());
+}</code></pre>
+<pre><code>cd lab/l0020
+javac KhongGeneric.java
+java KhongGeneric</code></pre>
+<div class="expect"><pre><code>Note: KhongGeneric.java uses unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+CÀ PHÊ
+Exception in thread "main" <span class="hl">java.lang.ClassCastException: class java.lang.Integer cannot be cast to class java.lang.String</span>
+	at KhongGeneric.main(KhongGeneric.java:10)</code></pre></div>
+<p>Lỗi chỉ lộ ra <strong>lúc chạy</strong>, ở chỗ lấy ra, xa chỗ bỏ nhầm vào. Viết <code>List&lt;String&gt; ds</code> thì dòng <code>ds.add(42)</code> bị chặn ngay khi biên dịch. Đó là toàn bộ lý do generics tồn tại: <strong>chuyển lỗi từ lúc chạy sang lúc biên dịch</strong>.<a class="cite" href="https://docs.oracle.com/javase/tutorial/java/generics/why.html">[Oracle: Why Use Generics?]</a></p>
+<p>Hai dòng "Note" là compiler cảnh báo bạn đang dùng raw type. Code mới đừng bao giờ dùng raw type (<em>Effective Java</em>, Item 26).</p>
+
+<h2>3 · Type erasure: nhãn bị bóc trước khi vào kho</h2>
+<p>Đây là điều bất ngờ nhất về generics trong Java: <strong>nhãn chỉ tồn tại lúc biên dịch</strong>. Compiler kiểm tra nhãn xong thì <em>bóc nhãn ra</em> rồi mới ghi vào file <code>.class</code>. Lúc chạy, JVM chỉ thấy <code>List</code> trơn. Việc bóc nhãn này gọi là <strong>type erasure</strong> (xoá kiểu).<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.6">[JLS §4.6]</a></p>
+<p>Kiểm chứng bằng <code>Erasure.java</code>:</p>
+<pre><code>List&lt;String&gt;  chu = new ArrayList&lt;&gt;();
+List&lt;Integer&gt; so  = new ArrayList&lt;&gt;();
+System.out.println("Cùng một class lúc chạy? " + (chu.getClass() == so.getClass()));
+System.out.println("Class thật: " + chu.getClass().getName());
+
+chu.add("cà phê");
+String s = chu.get(0);              // không cần ép kiểu?</code></pre>
+<pre><code>javac Erasure.java
+java Erasure</code></pre>
+<div class="expect"><pre><code>Cùng một class lúc chạy? <span class="hl">true</span>
+Class thật: java.util.ArrayList
+cà phê</code></pre></div>
+<p>Lúc chạy không có class "ArrayList của String" hay "ArrayList của Integer", chỉ có một <code>java.util.ArrayList</code>. Vậy tại sao <code>String s = chu.get(0)</code> không cần ép kiểu? Xem bytecode:</p>
+<pre><code>javap -c Erasure | grep -E 'List.(add|get)|checkcast'</code></pre>
+<div class="expect"><pre><code>70: invokeinterface #45,  2   // InterfaceMethod java/util/List.add:(<span class="hl">Ljava/lang/Object;</span>)Z
+78: invokeinterface #49,  2   // InterfaceMethod java/util/List.get:(I)<span class="hl">Ljava/lang/Object;</span>
+83: <span class="hl">checkcast</span>     #53         // class java/lang/String</code></pre></div>
+<ol class="flow">
+  <li><code>add</code> nhận <code>Object</code>, <code>get</code> trả về <code>Object</code>. Nhãn <code>&lt;String&gt;</code> đã biến mất. Đó cũng là lý do bên trong <code>ArrayList</code> là <code>Object[]</code> (bài 10): nó phải chứa được mọi thứ.</li>
+  <li>Lệnh <code>checkcast String</code> là phép ép kiểu do <strong>compiler tự viết thay bạn</strong>. Code nhìn sạch sẽ, nhưng bytecode y hệt kiểu cũ ở mục 2. Khác biệt duy nhất: compiler đã kiểm tra nhãn rồi, nên phép ép kiểu này "chắc chắn" đúng.</li>
+</ol>
+<p><em>Vì sao Java lại thiết kế vậy?</em> Để tương thích ngược: code Java 5 có generics phải chạy chung được với thư viện cũ viết bằng raw type, mà không cần sửa JVM.<a class="cite" href="https://docs.oracle.com/javase/tutorial/java/generics/erasure.html">[Oracle: Type Erasure]</a></p>
+
+<div class="remember"><strong>Type erasure</strong>: <code>&lt;T&gt;</code> chỉ để <em>compiler</em> kiểm tra. Sau khi biên dịch, <code>T</code> bị thay bằng <code>Object</code> (hoặc bằng cận trên, ví dụ <code>T extends Number</code> → <code>Number</code>), và compiler tự chèn <code>checkcast</code> ở chỗ lấy ra. JVM lúc chạy không biết <code>T</code> là gì.</div>
+
+<h3>Hệ quả 1: những thứ không làm được với <code>T</code></h3>
+<p>Lúc chạy không còn biết <code>T</code> là gì, nên mọi thao tác cần biết kiểu thật lúc chạy đều bị cấm:</p>
+<pre><code>javac loi/NewT.java          # new T() và o instanceof T
+javac loi/NameClash.java     # overload in(List&lt;String&gt;) và in(List&lt;Integer&gt;)</code></pre>
+<div class="expect"><pre><code>loi/NewT.java:2: error: unexpected type
+    T tao() { return <span class="hl">new T()</span>; }
+  required: class
+  found:    type parameter T
+
+loi/NameClash.java:5: error: <span class="hl">name clash: in(List&lt;Integer&gt;) and in(List&lt;String&gt;) have the same erasure</span></code></pre></div>
+<p>Lỗi thứ hai nối thẳng với bài 7: sau khi bóc nhãn, hai method đều thành <code>in(List)</code>, cùng chữ ký, nên không còn là overload hợp lệ.</p>
+
+<h3>Hệ quả 2: "rác lọt kho" (heap pollution)</h3>
+<p>Nếu có ai đó lách qua compiler bằng raw type, JVM không chặn lại được, vì lúc chạy nó không thấy nhãn. <code>LenLut.java</code>:</p>
+<pre><code>static void themBay(List ds) { ds.add(42); }        // nhận raw List, nhét Integer vào
+
+List&lt;String&gt; chu = new ArrayList&lt;&gt;();
+themBay(chu);                                    // lúc chạy không ai kiểm tra
+System.out.println("Kích thước: " + chu.size());
+Object o = chu.get(0);                           // lấy ra dạng Object: chưa sao
+System.out.println("Lấy ra được: " + o);
+String s = chu.get(0);                           // compiler chèn ép kiểu String: nổ</code></pre>
+<pre><code>javac LenLut.java
+java LenLut</code></pre>
+<div class="expect"><pre><code>Kích thước: 1
+Lấy ra được: 42
+Exception in thread "main" java.lang.ClassCastException: class java.lang.Integer cannot be cast to class java.lang.String
+	at LenLut.main(<span class="hl">LenLut.java:14</span>)</code></pre></div>
+<p>Một <code>List&lt;String&gt;</code> đang chứa số 42, và chương trình chạy bình thường cho tới dòng 14, nơi compiler đã chèn <code>checkcast</code>. Stack trace chỉ vào chỗ <strong>lấy ra</strong>, không phải chỗ <strong>bỏ vào</strong> (<code>themBay</code>). Ngoài đời, đây là loại bug khó tìm: thường do thư viện cũ dùng raw type, hoặc do reflection/JSON deserialize nhét sai kiểu. Vì vậy đừng bỏ qua cảnh báo "unchecked".<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.12.2">[JLS §4.12.2]</a></p>
+
+<h2>4 · <code>List&lt;Integer&gt;</code> không phải là <code>List&lt;Number&gt;</code></h2>
+<p><code>Integer</code> là một loại <code>Number</code>. Vậy chắc <code>List&lt;Integer&gt;</code> cũng là một loại <code>List&lt;Number&gt;</code>? <code>loi/ListNumber.java</code>:</p>
+<pre><code>List&lt;Integer&gt; soNguyen = new ArrayList&lt;&gt;();
+List&lt;Number&gt; so = soNguyen;</code></pre>
+<pre><code>javac loi/ListNumber.java</code></pre>
+<div class="expect"><pre><code>loi/ListNumber.java:7: error: incompatible types: <span class="hl">List&lt;Integer&gt; cannot be converted to List&lt;Number&gt;</span></code></pre></div>
+<div class="analogy">
+<p>Một <strong>giỏ táo</strong> có phải là một <strong>giỏ trái cây</strong> không? Nghe thì có. Nhưng "giỏ trái cây" cho phép bỏ <em>chuối</em> vào. Nếu được coi giỏ táo là giỏ trái cây, ai đó sẽ bỏ chuối vào giỏ táo, và người lấy ra "chắc chắn là táo" sẽ cắn phải chuối.</p>
+</div>
+<p>Nếu dòng trên được phép thì <code>so.add(1.5)</code> sẽ hợp lệ (1.5 là <code>Number</code>), và một <code>Double</code> nằm trong <code>soNguyen</code>. Đó đúng là heap pollution ở mục 3. Nên Java cấm: <code>List&lt;A&gt;</code> và <code>List&lt;B&gt;</code> <strong>không có quan hệ cha–con</strong>, dù <code>A</code> và <code>B</code> có. Tính chất này gọi là <strong>bất biến</strong> (invariant).</p>
+
+<p><strong>Mảng thì ngược lại, và trả giá cho điều đó.</strong> <code>BatBien.java</code>:</p>
+<pre><code>Number[] mang = new Integer[2];     // mảng: được phép
+mang[0] = 1;
+mang[1] = 1.5;                      // Double vào mảng Integer?</code></pre>
+<pre><code>javac BatBien.java
+java BatBien</code></pre>
+<div class="expect"><pre><code>Exception in thread "main" <span class="hl">java.lang.ArrayStoreException: java.lang.Double</span>
+	at BatBien.main(BatBien.java:5)</code></pre></div>
+<p>Mảng cho gán (gọi là <em>covariant</em>), nên phải tự kiểm tra lúc chạy. Làm được vì mảng <strong>nhớ</strong> kiểu thật của mình (<code>Integer[]</code>), không bị xoá như generics.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-10.html#jls-10.5">[JLS §10.5]</a> Generics không nhớ kiểu lúc chạy, nên chọn cách an toàn hơn: chặn ngay lúc biên dịch.</p>
+
+<div class="remember"><strong>Generics bất biến:</strong> <code>List&lt;Integer&gt;</code> không phải <code>List&lt;Number&gt;</code>. Lý do: nếu được thì sẽ bỏ được <code>Double</code> vào list số nguyên. Mảng thì cho phép, nên lỗi chỉ lộ ra lúc chạy (<code>ArrayStoreException</code>).</div>
+
+<h2>5 · Wildcard: <code>? extends</code> để đọc, <code>? super</code> để ghi</h2>
+<p>Bất biến thì an toàn, nhưng gây khó khăn. Viết method tính tổng <code>tong(List&lt;Number&gt; ds)</code> thì không truyền được <code>List&lt;Integer&gt;</code> vào. Wildcard (dấu <code>?</code>, nghĩa là "một kiểu nào đó") giải quyết chuyện này, với hai dạng. <code>Wildcard.java</code>:</p>
+<pre><code>// ? extends Number: "list của MỘT loại con nào đó của Number" → chỉ ĐỌC ra
+static double tong(List&lt;? extends Number&gt; ds) {
+    double t = 0;
+    for (Number n : ds) t += n.doubleValue();
+    return t;
+}
+// ? super Integer: "list chứa được Integer" → chỉ GHI vào
+static void them123(List&lt;? super Integer&gt; ds) {
+    ds.add(1); ds.add(2); ds.add(3);
+}
+
+tong(List.of(1, 2, 3));        // List&lt;Integer&gt;
+tong(List.of(1.5, 2.5));       // List&lt;Double&gt;
+them123(so);                   // List&lt;Number&gt;
+them123(doVat);                // List&lt;Object&gt;, đang có "ly"</code></pre>
+<pre><code>javac Wildcard.java
+java Wildcard</code></pre>
+<div class="expect"><pre><code>6.0
+4.0
+[1, 2, 3] [ly, 1, 2, 3]</code></pre></div>
+
+<p>Vì sao <code>? extends</code> chỉ đọc, còn <code>? super</code> chỉ ghi? Quay lại chuyện giỏ:</p>
+<table>
+<tr><th></th><th><code>List&lt;? extends Number&gt;</code></th><th><code>List&lt;? super Integer&gt;</code></th></tr>
+<tr><td>Nghĩa là</td><td>"giỏ của <em>một loại</em> trái cây nào đó, không biết loại gì"</td><td>"giỏ đựng được táo, có thể là giỏ táo, giỏ trái cây, hoặc thùng đồ vật"</td></tr>
+<tr><td>Có thể thật ra là</td><td><code>List&lt;Integer&gt;</code>, <code>List&lt;Double&gt;</code>...</td><td><code>List&lt;Integer&gt;</code>, <code>List&lt;Number&gt;</code>, <code>List&lt;Object&gt;</code></td></tr>
+<tr><td><strong>Đọc ra</strong></td><td>✔ Chắc chắn là <code>Number</code></td><td>✘ Chỉ biết là <code>Object</code></td></tr>
+<tr><td><strong>Ghi vào</strong></td><td>✘ Không biết đúng loại nào, bỏ gì cũng có thể sai</td><td>✔ Bỏ <code>Integer</code> vào luôn đúng</td></tr>
+</table>
+<p>Compiler chặn đúng như bảng:</p>
+<pre><code>javac loi/ExtendsAdd.java    # ds.add(1) với List&lt;? extends Number&gt;
+javac loi/SuperGet.java      # Integer x = ds.get(0) với List&lt;? super Integer&gt;</code></pre>
+<div class="expect"><pre><code>loi/ExtendsAdd.java:6: error: incompatible types: <span class="hl">int cannot be converted to CAP#1</span>
+  where CAP#1 is a fresh type-variable:
+    CAP#1 extends Number from capture of ? extends Number
+
+loi/SuperGet.java:6: error: incompatible types: <span class="hl">CAP#1 cannot be converted to Integer</span>
+  where CAP#1 is a fresh type-variable:
+    CAP#1 extends Object super: Integer from capture of ? super Integer</code></pre></div>
+<p><code>CAP#1</code> là tên compiler đặt cho "cái kiểu không biết tên đó". Đọc lỗi thứ nhất theo lời thường: "list này chứa một loại con của Number mà tôi không biết là gì, nên tôi không dám cho bạn bỏ <code>1</code> vào".</p>
+
+<div class="remember">
+<strong>PECS: Producer Extends, Consumer Super</strong> (<em>Effective Java</em>, Item 31).<br>
+Tham số <strong>cung cấp</strong> dữ liệu cho bạn đọc (producer) → <code>? extends T</code>.<br>
+Tham số <strong>nhận</strong> dữ liệu bạn ghi vào (consumer) → <code>? super T</code>.<br>
+Vừa đọc vừa ghi → không dùng wildcard, để <code>List&lt;T&gt;</code>.<a class="cite" href="https://docs.oracle.com/javase/tutorial/java/generics/wildcardGuidelines.html">[Oracle: Wildcard Guidelines]</a>
+</div>
+<p>Thư viện chuẩn làm đúng như vậy. Chữ ký của <code>Collections.copy</code>:<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Collections.html#copy(java.util.List,java.util.List)">[Javadoc]</a></p>
+<pre><code>public static &lt;T&gt; void copy(List&lt;? super T&gt; dest, List&lt;? extends T&gt; src)</code></pre>
+<p><code>src</code> cung cấp dữ liệu nên là <code>extends</code>. <code>dest</code> nhận dữ liệu nên là <code>super</code>.</p>
+
+<h2>6 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q19"></div>
+<script type="application/json" id="q19">[
+ {"q":"<code>new ArrayList&lt;String&gt;().getClass() == new ArrayList&lt;Integer&gt;().getClass()</code> trả về gì?",
+  "options":["false, vì khác kiểu phần tử","Lỗi biên dịch vì so sánh khác kiểu","true, vì nhãn kiểu bị xoá","Tuỳ phần tử đang có trong list"],
+  "answer":2,
+  "why":"Type erasure: sau biên dịch cả hai chỉ là <code>java.util.ArrayList</code>. <code>&lt;String&gt;</code> và <code>&lt;Integer&gt;</code> chỉ tồn tại để compiler kiểm tra."},
+ {"q":"Vì sao <code>List&lt;Number&gt; so = new ArrayList&lt;Integer&gt;();</code> bị lỗi biên dịch?",
+  "options":["Nếu được, so.add(1.5) sẽ phá list","Vì Integer không phải con của Number","Vì ArrayList không implements List","Vì generics không dùng được với số"],
+  "answer":0,
+  "why":"Generics bất biến. Nếu cho gán, <code>so.add(1.5)</code> hợp lệ và một <code>Double</code> sẽ nằm trong list số nguyên. Mảng cho gán kiểu này nên phải kiểm tra lúc chạy (<code>ArrayStoreException</code>)."},
+ {"q":"Method nhận <code>List&lt;? extends Number&gt; ds</code>. Thao tác nào biên dịch được?",
+  "options":["ds.add(1) để thêm số nguyên","ds.add(1.5) để thêm số thực","Number n = ds.get(0) để đọc","Integer i = ds.get(0) để đọc"],
+  "answer":2,
+  "why":"<code>? extends Number</code> là producer: đọc ra chắc chắn được <code>Number</code>. Không ghi được, vì list có thể thật ra là <code>List&lt;Double&gt;</code> hay <code>List&lt;Integer&gt;</code>. Đọc ra <code>Integer</code> cũng không được, vì có thể là <code>Double</code>."},
+ {"q":"Method cần <strong>thêm</strong> các <code>Integer</code> vào list do người gọi truyền vào. Tham số nên khai báo thế nào?",
+  "options":["List&lt;? extends Integer&gt; ds","List&lt;Object&gt; ds cho tất cả","List&lt;Number&gt; ds cho rộng rãi","List&lt;? super Integer&gt; ds"],
+  "answer":3,
+  "why":"List nhận dữ liệu là consumer → <code>? super Integer</code>. Khi đó người gọi truyền được <code>List&lt;Integer&gt;</code>, <code>List&lt;Number&gt;</code> hoặc <code>List&lt;Object&gt;</code>. Hai đáp án <code>List&lt;Number&gt;</code>/<code>List&lt;Object&gt;</code> chỉ nhận đúng một kiểu."},
+ {"q":"(Ôn bài 7) Vì sao <code>void in(List&lt;String&gt; a)</code> và <code>void in(List&lt;Integer&gt; a)</code> không cùng tồn tại được?",
+  "options":["Vì List không có kiểu String","Sau khi xoá kiểu, chữ ký trùng nhau","Vì overload phải khác kiểu trả về","Vì JVM chọn method theo object thật"],
+  "answer":1,
+  "why":"Overload phân biệt bằng chữ ký. Sau type erasure, cả hai đều là <code>in(List)</code>, nên compiler báo <code>name clash ... have the same erasure</code>."}
+]</script>
+
+<h2>7 · Thử thách: sửa chữ ký theo PECS</h2>
+<div class="lab">
+<p><code>Challenge.java</code> có method chép phần tử từ list này sang list khác:</p>
+<pre><code>// TODO: sửa CHỈ chữ ký của method này để main biên dịch được
+static &lt;T&gt; void chep(List&lt;T&gt; nguon, List&lt;T&gt; dich) {
+    for (T x : nguon) dich.add(x);
+}
+
+List&lt;Integer&gt; soNguyen = List.of(1, 2, 3);
+chep(soNguyen, so);       // so    là List&lt;Number&gt;
+chep(soNguyen, doVat);    // doVat là List&lt;Object&gt;</code></pre>
+<p>Hiện tại nó không biên dịch được:</p>
+<div class="expect"><pre><code>Challenge.java:14: error: method chep in class Challenge cannot be applied to given types;
+  required: List&lt;T&gt;,List&lt;T&gt;
+  found:    List&lt;Integer&gt;,List&lt;Number&gt;
+  reason: inference variable T has incompatible equality constraints Number,Integer</code></pre></div>
+<p>Dòng "reason" nói: <code>T</code> vừa phải là <code>Integer</code> (theo <code>nguon</code>) vừa phải là <code>Number</code> (theo <code>dich</code>), không thể cả hai. Hãy tự hỏi: tham số nào là producer, tham số nào là consumer?</p>
+<details><summary>Xem lời giải</summary>
+<pre><code>static &lt;T&gt; void chep(List&lt;? extends T&gt; nguon, List&lt;? super T&gt; dich)</code></pre>
+<div class="expect"><pre><code>[1, 2, 3] [1, 2, 3]</code></pre></div>
+<p><code>nguon</code> cung cấp dữ liệu (producer) → <code>extends</code>. <code>dich</code> nhận dữ liệu (consumer) → <code>super</code>. Compiler chọn <code>T = Integer</code>: <code>List&lt;Integer&gt;</code> khớp <code>? extends Integer</code>, còn <code>List&lt;Number&gt;</code> và <code>List&lt;Object&gt;</code> khớp <code>? super Integer</code>. Giống hệt chữ ký của <code>Collections.copy</code>.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: nhãn không bị xoá <em>hết</em>, và Spring tận dụng điều đó</summary>
+<p>Erasure xoá kiểu của <strong>object</strong> lúc chạy. Nhưng phần <strong>khai báo</strong> (kiểu của field, tham số method, class cha) vẫn được ghi lại trong file <code>.class</code>, ở một mục gọi là thuộc tính <code>Signature</code>.<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-4.html#jvms-4.7.9">[JVMS §4.7.9]</a> Reflection đọc được nó. <code>GenericInfo.java</code>:</p>
+<pre><code>List&lt;String&gt; danhSach;     // field
+
+GenericInfo.class.getDeclaredField("danhSach").getGenericType()
+new ArrayList&lt;String&gt;() {}.getClass().getGenericSuperclass()   // có {}: class con ẩn danh
+new ArrayList&lt;String&gt;().getClass().getGenericSuperclass()      // không có {}</code></pre>
+<div class="expect"><pre><code>java.util.List&lt;java.lang.String&gt;
+java.util.ArrayList&lt;java.lang.String&gt;
+java.util.AbstractList&lt;E&gt;</code></pre></div>
+<ul>
+  <li>Dòng 1: kiểu khai báo của field vẫn còn <code>&lt;String&gt;</code>. Spring dùng chính thông tin này để inject đúng bean vào field <code>List&lt;PaymentHandler&gt;</code> hay <code>Repository&lt;User&gt;</code>.</li>
+  <li>Dòng 2 và 3: thêm <code>{}</code> là tạo một class con ẩn danh, và <code>&lt;String&gt;</code> trở thành một phần <em>khai báo</em> class cha của nó, nên được giữ lại. Không có <code>{}</code> thì chỉ thấy <code>&lt;E&gt;</code> chung chung. Đây là mẹo "super type token" nằm sau <code>new ParameterizedTypeReference&lt;List&lt;User&gt;&gt;() {}</code> của Spring và <code>new TypeReference&lt;...&gt;() {}</code> của Jackson: cách duy nhất để báo cho thư viện biết "tôi muốn <code>List&lt;User&gt;</code>", khi <code>List&lt;User&gt;.class</code> là cú pháp không tồn tại.</li>
+</ul>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/java/generics/index.html">Oracle Java Tutorial: Generics</a>. Đọc kỹ hai trang <a href="https://docs.oracle.com/javase/tutorial/java/generics/erasure.html">Type Erasure</a> và <a href="https://docs.oracle.com/javase/tutorial/java/generics/wildcardGuidelines.html">Guidelines for Wildcard Use</a>. Sách: <em>Effective Java</em>, chương 5 (Item 26 raw type, Item 28 "Prefer lists to arrays", Item 31 PECS).</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "<code>&lt;T extends Comparable&lt;? super T&gt;&gt;</code> đọc thế nào?", "<code>List&lt;?&gt;</code> khác <code>List&lt;Object&gt;</code> ra sao?", "Vì sao không tạo được <code>new T[10]</code>?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0019-exception.html">← Bài 19: Exception</a><a href="0021-lambda-stream.html">Bài 21: Lambda và Stream →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

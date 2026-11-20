@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sắp xếp và Map có thứ tự</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Sắp xếp, Map có thứ tự, và lỗi "sửa list trong lúc duyệt"</h1>
+<p class="subtitle">Bài 23 · <code>Comparable</code>/<code>Comparator</code>, <code>TreeMap</code>, <code>LinkedHashMap</code> (làm LRU cache trong 5 dòng), và <code>ConcurrentModificationException</code></p>
+<div class="meta"><span>~45 phút</span><span>Cần biết: <a href="0003-equals-hashcode.html">Bài 3</a> (equals), <a href="0010-arraylist-ben-trong.html">Bài 10</a> (ArrayList), <a href="0011-hashmap-ben-trong.html">Bài 11</a> (HashMap), <a href="0021-lambda-stream.html">Bài 21</a> (lambda)</span><span>Thư mục thực hành: <code>lab/l0023</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Viết Comparator nhiều tiêu chí, và tránh 2 bẫy: trừ số bị tràn, và <code>TreeSet</code> "nuốt" phần tử.</li>
+  <li>Chọn đúng giữa <code>HashMap</code>, <code>TreeMap</code>, <code>LinkedHashMap</code> theo thứ tự bạn cần.</li>
+  <li>Hiểu vì sao xoá phần tử trong vòng <code>for</code> lại nổ lỗi (hoặc tệ hơn: không nổ), và sửa đúng cách.</li>
+</ul>
+
+<h2>1 · Ôn bài 3 và bài 11 (trả lời trong đầu trước)</h2>
+<div class="callout">
+<p>(a) <code>HashSet</code> dùng method nào để quyết định hai phần tử "trùng nhau"?</p>
+<p>(b) Duyệt một <code>HashMap</code> thì thứ tự các key ra sao?</p>
+<details><summary>Kiểm tra</summary>(a) <code>hashCode</code> để tìm ngăn, rồi <code>equals</code> để so. (b) Theo thứ tự các ngăn (bucket), không theo thứ tự thêm vào, cũng không sắp xếp, và có thể đổi khi map resize. Hôm nay: hai loại map <em>có</em> thứ tự, và một loại set <strong>không</strong> dùng <code>equals</code>.</details></div>
+
+<h2>2 · Comparable và Comparator: hai cách nói "cái nào đứng trước"</h2>
+<div class="analogy">
+<p>Một menu đồ uống có thể xếp theo nhiều cách. <strong>Comparable</strong> giống cách xếp <em>mặc định in sẵn</em> trên menu (theo giá). <strong>Comparator</strong> giống tờ giấy hướng dẫn bạn cầm theo: "hôm nay xếp theo tên", "xếp theo giá giảm dần". Đưa tờ giấy khác thì ra thứ tự khác, mà không phải in lại menu.</p>
+</div>
+<p>Cả hai đều trả lời cùng một câu hỏi bằng một con số: <strong>âm</strong> nghĩa là "a đứng trước b", <strong>0</strong> là "ngang nhau", <strong>dương</strong> là "a đứng sau b".<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Comparator.html">[Comparator]</a> <code>SapXep.java</code>:</p>
+<pre><code>record Mon(String ten, int gia) implements Comparable&lt;Mon&gt; {
+    @Override public int compareTo(Mon khac) { return Integer.compare(gia, khac.gia); }   // thứ tự "tự nhiên": theo giá
+}
+
+menu.sort(null);                                            // null = dùng compareTo
+menu.sort(Comparator.comparing(Mon::ten));                  // một cách sắp khác, không sửa class
+menu.sort(Comparator.comparingInt(Mon::gia).reversed().thenComparing(Mon::ten));</code></pre>
+<pre><code>cd lab/l0023
+javac SapXep.java
+java SapXep</code></pre>
+<div class="expect"><pre><code>Comparable (giá):        [cà phê 25000, bạc xỉu 30000, americano 30000, trà sữa 35000]
+Comparator (tên):        [americano 30000, bạc xỉu 30000, cà phê 25000, trà sữa 35000]
+Giá giảm dần, rồi theo tên: [trà sữa 35000, americano 30000, bạc xỉu 30000, cà phê 25000]</code></pre></div>
+<p>(Output thật in dạng <code>Mon[ten=cà phê, gia=25000]</code>; ở đây viết gọn cho dễ đọc.)</p>
+<table>
+<tr><th></th><th><code>Comparable&lt;T&gt;</code></th><th><code>Comparator&lt;T&gt;</code></th></tr>
+<tr><td>Nằm ở đâu</td><td>Trong chính class (<code>implements</code>)</td><td>Bên ngoài, một object riêng (thường là lambda, bài 21)</td></tr>
+<tr><td>Method</td><td><code>compareTo(T khac)</code></td><td><code>compare(T a, T b)</code></td></tr>
+<tr><td>Số lượng</td><td>Một thứ tự "tự nhiên" duy nhất</td><td>Bao nhiêu cách xếp cũng được</td></tr>
+<tr><td>Ví dụ có sẵn</td><td><code>String</code>, <code>Integer</code>, <code>LocalDate</code></td><td><code>Comparator.comparing(...)</code>, <code>.reversed()</code>, <code>.thenComparing(...)</code></td></tr>
+</table>
+<p>Ở dòng cuối, <code>americano</code> và <code>bạc xỉu</code> cùng giá 30 000, nên <code>thenComparing(Mon::ten)</code> phân xử theo tên. Ghép tiêu chí như vậy thì không cần viết <code>if/else</code> nào.</p>
+
+<h3>Bẫy 1 · "Mẹo" trừ hai số</h3>
+<p>Nhiều người viết <code>(a, b) -&gt; a - b</code> cho gọn. <code>TruSo.java</code>:</p>
+<pre><code>javac TruSo.java
+java TruSo</code></pre>
+<div class="expect"><pre><code>a - b             : <span class="hl">[5, 2147483647, -2147483648, -10]</span>
+Integer.compare   : [-2147483648, -10, 5, 2147483647]
+MIN_VALUE - 5 = <span class="hl">2147483643</span></code></pre></div>
+<p>Sắp xếp sai hoàn toàn. Lý do: <code>int</code> có giới hạn. Một số rất âm trừ đi số dương thì <strong>tràn</strong> qua phía dương (dòng cuối: số âm nhỏ nhất trừ 5 ra một số dương rất lớn), nên dấu của kết quả bị đảo. Với ID hay số tiền lớn, lỗi này xảy ra thật. Luôn dùng <code>Integer.compare(a, b)</code>, <code>Long.compare</code>, hoặc <code>Comparator.comparingInt(...)</code>.</p>
+
+<h3>Bẫy 2 · TreeSet không dùng <code>equals</code></h3>
+<p><code>MatPhanTu.java</code> thêm 3 món vào một <code>HashSet</code> và một <code>TreeSet</code> sắp theo giá:</p>
+<pre><code>Set&lt;Mon&gt; tree = new TreeSet&lt;&gt;(Comparator.comparingInt(Mon::gia));    // chỉ so theo giá
+s.add(new Mon("bạc xỉu", 30000));
+s.add(new Mon("americano", 30000));
+s.add(new Mon("cà phê", 25000));</code></pre>
+<pre><code>javac MatPhanTu.java
+java MatPhanTu</code></pre>
+<div class="expect"><pre><code>HashSet: 3 món [...]
+TreeSet: <span class="hl">2 món</span> [Mon[ten=cà phê, gia=25000], Mon[ten=bạc xỉu, gia=30000]]</code></pre></div>
+<p><code>americano</code> biến mất. <code>TreeSet</code> (và <code>TreeMap</code>) coi hai phần tử là "trùng" khi <strong><code>compare</code> trả về 0</strong>, chứ không gọi <code>equals</code>. Hai món cùng giá thì compare = 0, nên món sau bị coi là trùng và bị bỏ. Tài liệu Java gọi đây là thứ tự "không nhất quán với equals" và cảnh báo set sẽ cư xử "strangely".<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Comparable.html">[Comparable]</a> Sửa: thêm tiêu chí phân xử, ví dụ <code>.thenComparing(Mon::ten)</code>, để chỉ hai món thật sự giống nhau mới ra 0.</p>
+
+<div class="remember">So sánh trả về <strong>âm / 0 / dương</strong>. Dùng <code>Integer.compare</code> hoặc <code>Comparator.comparing...</code>, <strong>không trừ hai số</strong>. Với <code>TreeSet</code>/<code>TreeMap</code>, <code>compare == 0</code> nghĩa là trùng, nên thêm <code>thenComparing</code> để không mất phần tử.</div>
+
+<h2>3 · TreeMap: map luôn được sắp xếp theo key</h2>
+<p><code>TreeMap</code> giữ các key theo thứ tự tăng dần (theo <code>Comparable</code> hoặc Comparator bạn đưa vào). Bên trong là một cây đỏ–đen, nên <code>get</code>/<code>put</code>/<code>remove</code> tốn O(log n), chậm hơn HashMap một chút (HashMap gần như O(1), bài 11).<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/TreeMap.html">[TreeMap]</a> Bù lại, nó trả lời được những câu mà HashMap không trả lời được: "key gần nhất bên dưới X là gì?", "các key từ A tới B?".</p>
+<p>Ví dụ thực tế trong <code>BangPhiShip.java</code>: bảng phí ship theo cân nặng, "từ X gram trở lên thì phí Y":</p>
+<pre><code>m.put(1000, 25000);  m.put(0, 15000);  m.put(5000, 50000);  m.put(3000, 35000);   // vào cả TreeMap lẫn HashMap
+
+Map.Entry&lt;Integer, Integer&gt; bac = phi.floorEntry(gram);     // bậc lớn nhất &lt;= gram
+phi.subMap(1000, 5000)                                      // các bậc từ 1000 tới dưới 5000</code></pre>
+<pre><code>javac BangPhiShip.java
+java BangPhiShip</code></pre>
+<div class="expect"><pre><code>TreeMap duyệt: [0, 1000, 3000, 5000]
+HashMap duyệt: [0, 1000, 5000, 3000]
+300g → bậc 0g → phí 15000
+1000g → bậc 1000g → phí 25000
+2700g → bậc 1000g → phí 25000
+9000g → bậc 5000g → phí 50000
+Các bậc từ 1000g tới dưới 5000g: {1000=25000, 3000=35000}</code></pre></div>
+<p>Với HashMap bạn phải tự duyệt hết để tìm bậc phù hợp. Với TreeMap chỉ cần một dòng <code>floorEntry</code>. Các method tương tự: <code>ceilingKey</code> (nhỏ nhất ≥ X), <code>firstKey</code>/<code>lastKey</code>, <code>headMap</code>/<code>tailMap</code>. Hợp với bảng giá bậc thang, lịch theo thời gian, xếp hạng.</p>
+
+<h2>4 · LinkedHashMap: nhớ thứ tự, và làm LRU cache</h2>
+<p><code>LinkedHashMap</code> là HashMap (vẫn nhanh O(1)) có thêm một <strong>chuỗi nối các phần tử</strong> theo thứ tự. Mặc định là thứ tự <em>thêm vào</em>. Nếu tạo với tham số <code>accessOrder = true</code>, mỗi lần <code>get</code>/<code>put</code> sẽ chuyển phần tử đó xuống cuối, nên phần tử ở đầu luôn là phần tử <strong>lâu nhất chưa được dùng</strong>. Ghép với <code>removeEldestEntry</code> là có ngay một LRU cache (Least Recently Used: đầy thì bỏ cái lâu nhất chưa dùng).<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/LinkedHashMap.html">[LinkedHashMap: "well-suited to building LRU caches"]</a> <code>LruCache.java</code>:</p>
+<pre><code>Map&lt;String, Integer&gt; cache = new LinkedHashMap&lt;&gt;(16, 0.75f, true) {     // true = accessOrder
+    @Override protected boolean removeEldestEntry(Map.Entry&lt;String, Integer&gt; eldest) {
+        return size() &gt; 3;                       // quá 3 phần tử: bỏ phần tử lâu nhất chưa dùng
+    }
+};
+cache.put("u1", 1); cache.put("u2", 2); cache.put("u3", 3);
+cache.get("u1");
+cache.put("u4", 4);</code></pre>
+<pre><code>javac LruCache.java
+java LruCache</code></pre>
+<div class="expect"><pre><code>Thứ tự thêm vào: {c=3, a=1, b=2}
+Cache:            {u1=1, u2=2, u3=3}
+Sau get(u1):      {u2=2, u3=3, <span class="hl">u1=1</span>}
+Sau put(u4):      {u3=3, u1=1, u4=4}</code></pre></div>
+<ol class="flow">
+  <li>Dòng đầu: LinkedHashMap thường giữ đúng thứ tự thêm vào (c, a, b). HashMap thì không.</li>
+  <li><code>get("u1")</code> chuyển <code>u1</code> xuống cuối: nó vừa được dùng.</li>
+  <li><code>put("u4")</code> làm size thành 4 &gt; 3, nên phần tử đầu (<code>u2</code>, lâu nhất chưa dùng) bị bỏ. <code>u1</code> sống sót vì vừa được đọc.</li>
+</ol>
+<p>Cách viết <code>new LinkedHashMap&lt;&gt;(...) { ... }</code> là một class ẩn danh (bài 22). Trong code thật, nên viết thành một class <code>static</code> riêng. Và cache này không an toàn khi nhiều thread dùng chung (bài 12); production thường dùng thư viện như Caffeine.</p>
+
+<div class="remember">
+<strong>Chọn Map theo thứ tự bạn cần:</strong> không cần thứ tự → <code>HashMap</code>. Cần đúng thứ tự thêm vào (hoặc LRU) → <code>LinkedHashMap</code>. Cần sắp theo key, tìm "gần nhất", "trong khoảng" → <code>TreeMap</code>.
+</div>
+
+<h2>5 · ConcurrentModificationException: sửa list trong lúc duyệt</h2>
+<p>Tên có chữ "Concurrent" nhưng lỗi này <strong>thường xảy ra chỉ với một thread</strong>.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/ConcurrentModificationException.html">[ConcurrentModificationException]</a> <code>Cme.java</code> thử xoá phần tử ngay trong vòng <code>for-each</code>:</p>
+<pre><code>for (String s : a) if (s.equals("trà")) a.remove(s);        // xoá phần tử đầu
+for (String s : b) { daDuyet.add(s); if (s.equals("sữa")) b.remove(s); }   // xoá phần tử ÁP CHÓT</code></pre>
+<pre><code>javac Cme.java
+java Cme</code></pre>
+<div class="expect"><pre><code>Xoá phần tử đầu: <span class="hl">java.util.ConcurrentModificationException</span>
+Xoá áp chót: <span class="hl">không lỗi!</span> đã duyệt [trà, cà phê, sữa], list còn [trà, cà phê, nước cam]
+iterator.remove(): [trà, sữa, nước cam]
+removeIf:          [cà phê, nước cam]</code></pre></div>
+<p>Vì sao? Vòng <code>for-each</code> thật ra dùng một <strong>iterator</strong> (chính là inner class <code>ArrayList.Itr</code> ở bài 22). Xem bên trong:</p>
+<pre><code>javap -p 'java.util.ArrayList$Itr' | grep -E 'ModCount|checkFor'
+javap -p java.util.AbstractList | grep modCount</code></pre>
+<div class="expect"><pre><code>  int expectedModCount;
+  final void checkForComodification();
+  protected transient int modCount;</code></pre></div>
+<ol class="flow">
+  <li>List giữ một bộ đếm <code>modCount</code>, tăng lên mỗi lần list bị thêm hoặc xoá.</li>
+  <li>Lúc bắt đầu duyệt, iterator chép lại con số đó vào <code>expectedModCount</code>.</li>
+  <li>Mỗi lần lấy phần tử tiếp theo (<code>next()</code>), iterator kiểm tra hai số còn bằng nhau không. Khác nhau nghĩa là "có ai đó sửa list sau lưng tôi", và nó ném <code>ConcurrentModificationException</code> ngay. Cách làm này gọi là <strong>fail-fast</strong>: báo lỗi sớm thay vì chạy tiếp với dữ liệu sai.</li>
+</ol>
+<p><strong>Trường hợp áp chót còn nguy hiểm hơn:</strong> xoá <code>sữa</code> (phần tử thứ 3/4) làm list còn 3 phần tử. Iterator đang ở vị trí 3, hỏi <code>hasNext()</code> ("vị trí 3 khác size 3?") được trả lời <em>không</em>, nên vòng lặp kết thúc trước khi kịp gọi <code>next()</code> để kiểm tra. Kết quả: <strong>không có lỗi, nhưng "nước cam" không bao giờ được duyệt</strong>. Đó là lý do tài liệu nói fail-fast <em>"cannot be guaranteed"</em> và chỉ nên dùng để phát hiện bug.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/ArrayList.html">[ArrayList: fail-fast]</a></p>
+<p><strong>Cách đúng</strong> (hai dòng cuối của output):</p>
+<ul>
+  <li><code>list.removeIf(dieuKien)</code>: gọn nhất, nên dùng mặc định (lambda, bài 21).</li>
+  <li><code>iterator.remove()</code>: xoá thông qua chính iterator, nên nó tự cập nhật <code>expectedModCount</code>.</li>
+  <li>Nhiều thread cùng đọc và sửa: dùng collection dành cho đa luồng (<code>ConcurrentHashMap</code>, <code>CopyOnWriteArrayList</code>). Iterator của chúng không ném lỗi này.</li>
+</ul>
+
+<div class="remember">Không bao giờ gọi <code>list.add</code>/<code>list.remove</code> bên trong <code>for-each</code> của chính list đó. Dùng <code>removeIf</code> hoặc <code>iterator.remove()</code>. <code>ConcurrentModificationException</code> là cảnh báo <em>có thể có</em>, không phải đảm bảo: không thấy lỗi chưa chắc code đúng.</div>
+
+<h2>6 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q23"></div>
+<script type="application/json" id="q23">[
+ {"q":"Comparator <code>(a, b) -&gt; a - b</code> cho list gồm số rất âm và rất dương. Vấn đề là gì?",
+  "options":["Chậm hơn Integer.compare rất nhiều","Lỗi biên dịch vì kiểu trả về","Ném ArithmeticException khi tràn","Phép trừ tràn số, đảo dấu kết quả"],
+  "answer":3,
+  "why":"<code>int</code> tràn không báo lỗi: <code>MIN_VALUE - 5</code> ra một số dương lớn, nên comparator trả sai dấu và list bị sắp sai. Dùng <code>Integer.compare</code>."},
+ {"q":"<code>TreeSet</code> với Comparator chỉ so theo giá. Thêm hai món khác tên nhưng cùng giá. Set có mấy phần tử?",
+  "options":["2, vì tên khác nhau theo equals","1, vì compare trả về 0 là trùng","2, nhưng món sau đè dữ liệu món trước","Lỗi lúc chạy vì hai món cùng giá"],
+  "answer":1,
+  "why":"TreeSet/TreeMap dùng <code>compare == 0</code> để coi là trùng, không gọi <code>equals</code>. Món thứ hai bị bỏ. Thêm <code>thenComparing</code> để phân xử."},
+ {"q":"Cần map để tra \"phí ship cho bậc cân nặng lớn nhất không vượt quá X\". Chọn gì?",
+  "options":["TreeMap với floorEntry(x)","HashMap rồi duyệt tìm bậc","LinkedHashMap theo thứ tự thêm","ConcurrentHashMap cho an toàn"],
+  "answer":0,
+  "why":"TreeMap giữ key đã sắp xếp nên <code>floorEntry(x)</code> tìm được bậc lớn nhất ≤ x trong O(log n). HashMap phải duyệt hết."},
+ {"q":"<code>LinkedHashMap</code> tạo với <code>accessOrder = true</code> và <code>removeEldestEntry</code> trả về <code>size() &gt; 3</code>. Khi thêm phần tử thứ 4, phần tử nào bị bỏ?",
+  "options":["Phần tử được thêm vào đầu tiên","Phần tử có key nhỏ nhất","Phần tử lâu nhất chưa được dùng","Phần tử có hashCode lớn nhất"],
+  "answer":2,
+  "why":"Với accessOrder, mỗi lần get/put đưa phần tử xuống cuối, nên phần tử đầu là phần tử lâu nhất chưa dùng (LRU). Phần tử thêm đầu tiên vẫn sống nếu vừa được đọc."},
+ {"q":"(Ôn bài 22) Iterator của <code>ArrayList</code> phát hiện list bị sửa nhờ đâu?",
+  "options":["Một thread giám sát chạy song song","So modCount của list với expectedModCount","Khoá synchronized trên cả list","GC báo khi mảng bên trong đổi"],
+  "answer":1,
+  "why":"<code>ArrayList.Itr</code> là inner class (đọc list ngoài qua <code>this$0</code>). Nó nhớ <code>expectedModCount</code> lúc bắt đầu và so với <code>modCount</code> của list mỗi lần <code>next()</code>."}
+]</script>
+
+<h2>7 · Thử thách: sắp xếp đơn hàng nhiều tiêu chí</h2>
+<div class="lab">
+<p><code>Challenge.java</code> có 5 đơn hàng. Viết <strong>một</strong> Comparator, không dùng <code>if</code>, sắp theo:</p>
+<ol>
+  <li>Khách VIP lên trước.</li>
+  <li>Cùng nhóm thì tổng tiền <strong>giảm</strong> dần.</li>
+  <li>Bằng tiền thì mã đơn <strong>tăng</strong> dần.</li>
+</ol>
+<pre><code>record Don(String ma, boolean vip, long tong) { }
+
+// TODO: sửa dòng này
+Comparator&lt;Don&gt; thuTu = Comparator.comparing(Don::ma);</code></pre>
+<p>Kết quả mong muốn:</p>
+<div class="expect"><pre><code>D07 vip=true tong=250000
+D01 vip=true tong=80000
+D02 vip=true tong=80000
+D09 vip=false tong=300000
+D05 vip=false tong=120000</code></pre></div>
+<p>Gợi ý: <code>Boolean</code> có thứ tự <code>false &lt; true</code>. Cẩn thận với <code>.reversed()</code>: nó đảo <em>toàn bộ</em> chuỗi đứng trước nó.</p>
+<details><summary>Xem lời giải</summary>
+<pre><code>Comparator&lt;Don&gt; thuTu = Comparator.comparing(Don::vip).reversed()
+        .thenComparing(Comparator.comparingLong(Don::tong).reversed())
+        .thenComparing(Don::ma);</code></pre>
+<ul>
+  <li><code>comparing(Don::vip).reversed()</code>: <code>true</code> lên trước.</li>
+  <li>Tổng giảm dần phải bọc riêng: <code>thenComparing(comparingLong(Don::tong).reversed())</code>. Nếu viết <code>.thenComparingLong(Don::tong).reversed()</code> thì <code>reversed()</code> đảo luôn cả tiêu chí VIP phía trước.</li>
+  <li><code>D01</code> và <code>D02</code> cùng VIP, cùng 80 000, nên mã tăng dần phân xử.</li>
+</ul>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: hợp đồng của compare, và vì sao <code>TimSort</code> có thể ném lỗi</summary>
+<p>Một comparator hợp lệ phải tuân theo "hợp đồng" giống <code>equals</code> ở bài 3: đảo dấu khi đổi chỗ (<code>sgn(compare(a,b)) == -sgn(compare(b,a))</code>), bắc cầu (a &lt; b và b &lt; c thì a &lt; c), và nhất quán.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Comparator.html#compare(T,T)">[Comparator.compare]</a> Comparator vi phạm (ví dụ trừ số bị tràn như mục 2, hoặc so sánh dựa trên giá trị ngẫu nhiên/thời gian hiện tại) có thể khiến thuật toán sắp xếp của Java (TimSort) ném <code>IllegalArgumentException: Comparison method violates its general contract!</code> với dữ liệu lớn. Đây là một lỗi production có thật, và nó chỉ xuất hiện với <em>một số</em> bộ dữ liệu, nên rất khó tái hiện.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://dev.java/learn/api/collections-framework/">dev.java: The Collections Framework</a> (có các phần về SortedMap/NavigableMap và Comparator). Javadoc đáng đọc nhất: <a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/TreeMap.html">TreeMap</a> (các method <code>floor</code>/<code>ceiling</code>/<code>subMap</code>) và <a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/LinkedHashMap.html">LinkedHashMap</a> (đoạn về LRU cache). Sách: <em>Effective Java</em>, Item 14 "Consider implementing Comparable".</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "Sắp xếp có null thì sao (<code>Comparator.nullsFirst</code>)?", "<code>ConcurrentSkipListMap</code> là gì?", "Vì sao cache production lại dùng Caffeine chứ không dùng LinkedHashMap?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0022-inner-vs-static-nested.html">← Bài 22: Inner class vs static nested</a><a href="../reference/lo-trinh.html">Lộ trình →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

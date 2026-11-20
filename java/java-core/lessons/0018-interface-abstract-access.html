@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interface, abstract class, access modifier</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Interface vs abstract class, và 4 mức truy cập</h1>
+<p class="subtitle">Bài 18 · Khi nào dùng "khung nhà dựng dở", khi nào dùng "hợp đồng"; và ai được nhìn thấy cái gì trong code của bạn</p>
+<div class="meta"><span>~40 phút</span><span>Cần biết: <a href="0006-this-super.html">Bài 6</a> (super), <a href="0007-overriding-overloading.html">Bài 7</a> (override), <a href="0017-proxy-va-reflection.html">Bài 17</a> (proxy)</span><span>Thư mục thực hành: <code>lab/l0018</code></span></div>
+
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Nói được 4 điểm khác nhau giữa interface và abstract class, kèm bằng chứng chạy thật.</li>
+  <li>Chọn đúng một trong hai khi thiết kế, và hiểu vì sao Spring thích interface.</li>
+  <li>Thuộc bảng 4 mức truy cập, và tránh được 2 bẫy hay gặp khi phỏng vấn.</li>
+</ul>
+
+<h2>1 · Ôn bài 7 và bài 17 (trả lời trong đầu trước)</h2>
+<div class="callout">
+<p>(a) <code>DongVat a = new Cho(); a.keu();</code> chạy bản <code>keu()</code> của ai? Ai quyết định, và lúc nào?</p>
+<p>(b) Ở bài 17, <code>Proxy.newProxyInstance(...)</code> nhận một mảng các... gì?</p>
+<details><summary>Kiểm tra</summary>(a) Bản của <code>Cho</code>. JVM quyết định lúc chạy, theo object thật (override). (b) Mảng các <strong>interface</strong> (<code>new Class&lt;?&gt;[]{ OrderService.class }</code>). JDK proxy chỉ làm được với interface. Bạn sẽ hiểu vì sao ở mục 5.</details></div>
+
+<h2>2 · Hai câu chuyện để nhớ</h2>
+<div class="analogy">
+<p><strong>Abstract class giống một căn nhà xây dở.</strong> Móng, tường, mái đã làm xong và giống nhau cho mọi căn. Chỉ còn vài phòng để trống, ai mua thì tự hoàn thiện theo ý mình. Không ai ở được trong căn nhà dở dang, phải hoàn thiện xong mới dọn vào. Và mỗi căn nhà chỉ xây trên <strong>một</strong> cái móng.</p>
+<p><strong>Interface giống một tấm bằng hay chứng chỉ.</strong> "Bằng lái xe" chỉ hứa một điều: người có bằng thì lái được xe. Nó không quan tâm bạn là ai, cao hay thấp, làm nghề gì. Một người có thể có <strong>nhiều</strong> bằng cùng lúc: bằng lái xe, chứng chỉ bơi, chứng chỉ tiếng Anh.</p>
+</div>
+<p>Hai câu chuyện chứa đủ ý chính: abstract class là <em>"là một loại gì"</em> (có phần làm sẵn, có trạng thái chung). Interface là <em>"làm được việc gì"</em> (một lời hứa, gắn được nhiều cái).</p>
+
+<h2>3 · Abstract class: phần chung làm sẵn, phần riêng để trống</h2>
+<p>Mở <code>AbstractDemo.java</code>:</p>
+<pre><code>static abstract class Hinh {
+    final String ten;                         // được có field (trạng thái)
+    Hinh(String ten) { this.ten = ten; }      // ...và constructor
+    abstract double dienTich();               // chưa làm: để class con làm
+    String moTa() { return ten + ": " + dienTich(); }   // làm sẵn, dùng chung
+}
+static class HinhVuong extends Hinh {
+    final double canh;
+    HinhVuong(double canh) { super("Hình vuông"); this.canh = canh; }
+    @Override double dienTich() { return canh * canh; }
+}
+// HinhTron tương tự, dienTich() = π·r²</code></pre>
+<pre><code>cd lab/l0018
+javac AbstractDemo.java
+java AbstractDemo</code></pre>
+<div class="expect"><pre><code>Hình vuông: 9.0
+Hình tròn: 3.14</code></pre></div>
+<p>Đọc từng phần:</p>
+<ul>
+  <li><strong>Method <code>abstract</code></strong> (<code>dienTich()</code>) chỉ có tên, không có thân. Đó là "phòng để trống". Class con <em>bắt buộc</em> phải override nó (bài 7), nếu không thì class con cũng phải là abstract.</li>
+  <li><strong>Method thường</strong> (<code>moTa()</code>) đã có thân, mọi class con dùng chung. Bên trong nó gọi <code>dienTich()</code>, và nhờ override, lúc chạy JVM gọi đúng bản của hình vuông hay hình tròn.</li>
+  <li><strong>Field và constructor</strong>: abstract class giữ được trạng thái (<code>ten</code>). Class con gọi <code>super("Hình vuông")</code> để điền phần đó (bài 6).</li>
+</ul>
+<p>"Không ai ở được trong nhà dở dang": thử tạo object từ abstract class, file <code>loi/NewAbstract.java</code>:</p>
+<pre><code>javac loi/NewAbstract.java</code></pre>
+<div class="expect"><pre><code>loi/NewAbstract.java:4: error: <span class="hl">Hinh is abstract; cannot be instantiated</span></code></pre></div>
+<p>Hợp lý thôi: nếu tạo được <code>new Hinh()</code> thì gọi <code>dienTich()</code> sẽ chạy cái gì? Nó đâu có thân.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.1.1.1">[JLS §8.1.1.1]</a></p>
+
+<div class="remember"><strong>Abstract class</strong> = class chưa hoàn chỉnh. Có thể có field, constructor, method đã làm sẵn, và method <code>abstract</code> để con làm. Không <code>new</code> được. Mỗi class chỉ <code>extends</code> được <strong>một</strong> class.</div>
+
+<h2>4 · Interface: một lời hứa "làm được việc gì"</h2>
+<p>Mở <code>InterfaceDemo.java</code>:</p>
+<pre><code>interface CoTheBay {
+    int SO_CANH = 2;                          // trông như field thường...
+    void bay();                               // không có thân: class phải tự làm
+    default String gioiThieu() { return "Tôi bay được"; }   // Java 8+: có thân sẵn
+}
+interface CoTheBoi { void boi(); }
+
+static class Vit implements CoTheBay, CoTheBoi {          // một class, nhiều interface
+    @Override public void bay() { System.out.println("Vịt vỗ cánh bay"); }
+    @Override public void boi() { System.out.println("Vịt bơi"); }
+}</code></pre>
+<pre><code>javac InterfaceDemo.java
+java InterfaceDemo</code></pre>
+<div class="expect"><pre><code>Vịt vỗ cánh bay
+Vịt bơi
+Tôi bay được
+Vịt vỗ cánh bay
+SO_CANH là: <span class="hl">public static final</span>
+bay() là:   <span class="hl">public abstract</span></code></pre></div>
+<p>Hai dòng cuối dùng reflection (bài 17) để hỏi JVM: "<code>SO_CANH</code> và <code>bay()</code> thật ra được khai báo thế nào?". Câu trả lời cho thấy những chữ mà compiler <strong>tự thêm vào</strong>:</p>
+<ul>
+  <li><code>int SO_CANH = 2;</code> thật ra là <code>public static final</code>. Interface <strong>không có field của object</strong>, chỉ có hằng số dùng chung.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-9.html#jls-9.3">[JLS §9.3]</a> Đó là điểm khác lớn nhất so với abstract class: interface không giữ trạng thái riêng cho từng object.</li>
+  <li><code>void bay();</code> thật ra là <code>public abstract</code>. Mọi method trong interface tự động <code>public</code>.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-9.html#jls-9.4">[JLS §9.4]</a> Vì vậy class <code>Vit</code> phải ghi <code>public void bay()</code>. Quên chữ <code>public</code> thì gặp lại lỗi của bài 7:</li>
+</ul>
+<pre><code>javac loi/NarrowImpl.java</code></pre>
+<div class="expect"><pre><code>loi/NarrowImpl.java:4: error: chao() in NarrowImpl cannot implement chao() in ChaoHoi
+  <span class="hl">attempting to assign weaker access privileges; was public</span></code></pre></div>
+<p><code>javap</code> (bài 1) cho thấy cùng điều đó:</p>
+<pre><code>javap 'InterfaceDemo$CoTheBay'</code></pre>
+<div class="expect"><pre><code>interface InterfaceDemo$CoTheBay {
+  public static final int SO_CANH;
+  public abstract void bay();
+  public default java.lang.String gioiThieu();
+}</code></pre></div>
+
+<p><strong><code>default</code> method</strong> (có từ Java 8) là method có thân sẵn trong interface. Nó sinh ra để thêm method mới vào interface cũ mà không làm hỏng mọi class đang implement nó. Ví dụ <code>List.sort(...)</code> và <code>Collection.stream()</code> được thêm vào Java 8 theo cách này.<a class="cite" href="https://docs.oracle.com/javase/tutorial/java/IandI/defaultmethods.html">[Oracle: Default Methods]</a></p>
+<p>Nhưng nếu một class nhận <em>hai</em> default method trùng tên từ hai interface thì sao? <code>loi/Diamond.java</code>:</p>
+<pre><code>interface Chim   { default String keu() { return "Chíp chíp"; } }
+interface DoChoi { default String keu() { return "Bíp bíp"; } }
+public class Diamond implements Chim, DoChoi { }</code></pre>
+<pre><code>javac loi/Diamond.java</code></pre>
+<div class="expect"><pre><code>loi/Diamond.java:4: error: types Chim and DoChoi are incompatible;
+  <span class="hl">class Diamond inherits unrelated defaults for keu() from types Chim and DoChoi</span></code></pre></div>
+<p>Java không tự đoán thay bạn: compiler bắt bạn tự override và nói rõ muốn bản nào. Đó là thử thách ở mục 9.</p>
+
+<div class="remember"><strong>Interface</strong> = lời hứa "làm được việc gì". Method tự động <code>public</code> (thường là <code>abstract</code>, hoặc <code>default</code>/<code>static</code> có thân). Field tự động <code>public static final</code>, nên không có trạng thái riêng cho từng object. Không <code>new</code> được. Một class <code>implements</code> được <strong>nhiều</strong> interface.</div>
+
+<h2>5 · Chọn cái nào?</h2>
+<table>
+<tr><th></th><th>Abstract class</th><th>Interface</th></tr>
+<tr><td>Ý nghĩa</td><td>"là một loại..." (nhà xây dở)</td><td>"làm được..." (tấm bằng)</td></tr>
+<tr><td>Một class được dùng mấy cái</td><td><strong>một</strong> (<code>extends</code>)</td><td><strong>nhiều</strong> (<code>implements</code>)</td></tr>
+<tr><td>Field của object, constructor</td><td>Có</td><td>Không (chỉ hằng số <code>public static final</code>)</td></tr>
+<tr><td>Method có thân</td><td>Có, mọi mức truy cập</td><td><code>default</code>, <code>static</code>, <code>private</code> (Java 9+)</td></tr>
+<tr><td>Mức truy cập của method abstract</td><td>Tuỳ bạn chọn</td><td>Luôn <code>public</code></td></tr>
+</table>
+<p><strong>Quy tắc thực tế:</strong> mặc định dùng <strong>interface</strong> để mô tả "làm được gì". Chỉ dùng <strong>abstract class</strong> khi các class con thật sự dùng chung <em>trạng thái</em> hoặc <em>các bước làm sẵn</em>. Thường gặp nhất là kết hợp cả hai: một interface, cộng một abstract class cài sẵn phần chung cho interface đó. Ví dụ <code>List</code> (interface) đi kèm <code>AbstractList</code> (abstract class), và <code>ArrayList</code> kế thừa <code>AbstractList</code>. <em>Effective Java</em> đặt tên quy tắc này là Item 20: <em>"Prefer interfaces to abstract classes"</em>.</p>
+
+<p><strong>Liên hệ Spring.</strong> Spring khuyến khích viết <code>OrderService</code> (interface) và <code>OrderServiceImpl</code> (class). Lý do nằm ngay ở bài 17: JDK dynamic proxy tạo ra một class mới <em>implements</em> các interface bạn đưa vào. Vì một class implements được bao nhiêu interface cũng được, proxy có thể "đóng vai" bean của bạn mà không cần là class con của nó. Nếu bean không có interface nào, Spring phải chuyển sang CGLIB (tạo class con, bài 7), và mang theo các giới hạn về <code>final</code>/<code>private</code>.<a class="cite" href="https://docs.spring.io/spring-framework/reference/core/aop/proxying.html">[Spring: Proxying Mechanisms]</a></p>
+
+<h2>6 · Access modifier: ai được nhìn thấy cái gì</h2>
+<div class="analogy">
+<p>Một quán cà phê có 4 loại thông tin:</p>
+<ul>
+  <li><strong>Tên món</strong> trên bảng menu: <em>ai cũng thấy</em>, kể cả người đi đường.</li>
+  <li><strong>Công thức pha</strong>: nhân viên của quán thấy, và <em>các chi nhánh nhượng quyền</em> (class con) ở nơi khác cũng được biết.</li>
+  <li><strong>Số hàng tồn kho</strong>: chỉ nhân viên <em>trong quán này</em> biết.</li>
+  <li><strong>Giá vốn</strong>: chỉ <em>chủ quán</em> biết.</li>
+</ul>
+</div>
+<p>Bốn mức truy cập trong Java ứng đúng bốn loại đó. "Package" là thư mục chứa class, ứng với "cái quán":<a class="cite" href="https://docs.oracle.com/javase/tutorial/java/javaOO/accesscontrol.html">[Oracle: Controlling Access]</a></p>
+<table>
+<tr><th>Mức</th><th>Cùng class</th><th>Cùng package</th><th>Class con ở package khác</th><th>Mọi nơi</th></tr>
+<tr><td><code>public</code> (tên món)</td><td>✔</td><td>✔</td><td>✔</td><td>✔</td></tr>
+<tr><td><code>protected</code> (công thức)</td><td>✔</td><td>✔</td><td>✔</td><td>✘</td></tr>
+<tr><td><em>(không ghi gì)</em>, gọi là package-private (tồn kho)</td><td>✔</td><td>✔</td><td>✘</td><td>✘</td></tr>
+<tr><td><code>private</code> (giá vốn)</td><td>✔</td><td>✘</td><td>✘</td><td>✘</td></tr>
+</table>
+
+<p>Kiểm chứng bằng hai package. <code>cuahang/SanPham.java</code>:</p>
+<pre><code>package cuahang;
+public class SanPham {
+    public String ten = "Cà phê";         // ai cũng thấy
+    protected String moTa = "Rang xay";   // cùng package + class con
+    int tonKho = 50;                       // (không ghi gì) chỉ cùng package
+    private int giaVon = 18000;            // chỉ trong class SanPham
+    ...
+}</code></pre>
+<p>Ba class đứng ở ba vị trí khác nhau:</p>
+<ul>
+  <li><code>cuahang/KhoHang.java</code>: <strong>cùng package</strong>, đọc <code>ten</code>, <code>moTa</code>, <code>tonKho</code>.</li>
+  <li><code>khach/SanPhamGiamGia.java</code>: <strong>class con ở package khác</strong>, đọc <code>ten</code> và <code>moTa</code>.</li>
+  <li><code>khach/KhachHang.java</code>: <strong>người lạ</strong> ở package khác, thử đọc cả 4.</li>
+</ul>
+<pre><code>javac cuahang/*.java khach/SanPhamGiamGia.java
+java cuahang.KhoHang
+java khach.SanPhamGiamGia</code></pre>
+<div class="expect"><pre><code>Cà phê | Rang xay | tồn 50
+rẻ hơn chính nó? false
+Cà phê (Rang xay) giảm 10%</code></pre></div>
+<pre><code>javac khach/KhachHang.java</code></pre>
+<div class="expect"><pre><code>khach/KhachHang.java:9: error: <span class="hl">moTa has protected access in SanPham</span>
+khach/KhachHang.java:10: error: <span class="hl">tonKho is not public in SanPham; cannot be accessed from outside package</span>
+khach/KhachHang.java:11: error: <span class="hl">giaVon has private access in SanPham</span>
+3 errors</code></pre></div>
+<p>Người lạ chỉ đọc được <code>ten</code>. Mỗi dòng lỗi khớp với một hàng trong bảng.</p>
+
+<h3>Hai bẫy hay gặp khi phỏng vấn</h3>
+<ol class="flow">
+  <li><strong><code>protected</code> rộng hơn bạn tưởng.</strong> Nhiều người nghĩ <code>protected</code> nghĩa là "chỉ class con". Sai: nó gồm <em>cả cùng package</em>. <code>KhoHang</code> không phải class con mà vẫn đọc được <code>moTa</code>. Nhìn lại bảng: mỗi mức trên luôn bao gồm mọi quyền của mức dưới.</li>
+  <li><strong><code>private</code> là riêng của <em>class</em>, không phải riêng của <em>object</em>.</strong> Trong <code>SanPham</code> có method:
+<pre><code>public boolean reHon(SanPham khac) {
+    return this.giaVon &lt; khac.giaVon;   // đọc private của object KHÁC: được!
+}</code></pre>
+  Code này biên dịch được. Quy tắc truy cập được compiler kiểm tra theo <em>chỗ đặt code</em> (đang ở trong class nào), không theo object nào.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-6.html#jls-6.6.1">[JLS §6.6.1]</a> Đây chính là lý do <code>equals</code> ở bài 3 đọc được <code>o.x</code> dù <code>x</code> là <code>private</code>.</li>
+</ol>
+
+<div class="remember"><strong>Nguyên tắc chọn: để mức hẹp nhất có thể.</strong> Field gần như luôn <code>private</code>. Mở rộng ra chỉ khi có lý do. Thứ gì đã <code>public</code> thì người khác sẽ dùng, và bạn sẽ không bao giờ sửa được nữa mà không làm hỏng code của họ. (<em>Effective Java</em>, Item 15: <em>"Minimize the accessibility of classes and members"</em>.)</div>
+
+<h2>7 · Nối lại với Spring</h2>
+<p>Bài 7 đã nói <code>@Transactional</code> trên method <code>private</code> không có tác dụng. Giờ bạn hiểu trọn vẹn vì sao: proxy là một class <em>khác</em>. JDK proxy chỉ "đóng vai" được các method <code>public</code> của interface. CGLIB là class con, mà class con thì không nhìn thấy và không override được method <code>private</code>. Cả hai cách đều không chạm tới method <code>private</code>.</p>
+
+<h2>8 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q18"></div>
+<script type="application/json" id="q18">[
+ {"q":"<code>abstract class Hinh</code> có method <code>abstract double dienTich()</code>. Viết <code>Hinh h = new Hinh();</code> thì sao?",
+  "options":["Chạy được, dienTich() trả về 0","Lỗi biên dịch: không new được","Chạy được, gọi dienTich() mới lỗi","Ném NullPointerException lúc chạy"],
+  "answer":1,
+  "why":"Abstract class chưa hoàn chỉnh (có method không có thân), nên compiler cấm tạo object: <code>Hinh is abstract; cannot be instantiated</code>. Phải tạo object từ một class con đã override đủ."},
+ {"q":"Class <code>Vit</code> muốn vừa bay được vừa bơi được, kế thừa từ hai nơi. Cách nào hợp lệ?",
+  "options":["extends hai abstract class cùng lúc","extends một class, rồi extends tiếp","Không cách nào, Java cấm hoàn toàn","implements hai interface cùng lúc"],
+  "answer":3,
+  "why":"Một class chỉ <code>extends</code> được một class, nhưng <code>implements</code> được nhiều interface. Đây là lý do interface hợp với kiểu \"làm được việc gì\": một object có thể có nhiều khả năng."},
+ {"q":"Trong interface viết <code>int SO_CANH = 2;</code>. Compiler hiểu dòng này là gì?",
+  "options":["public static final int SO_CANH","private int SO_CANH của từng object","protected int SO_CANH sửa được","int SO_CANH chỉ dùng trong package"],
+  "answer":0,
+  "why":"Mọi field trong interface tự động là <code>public static final</code>: một hằng số dùng chung. Interface không có trạng thái riêng cho từng object, khác với abstract class."},
+ {"q":"Class <code>SanPham</code> có <code>private int giaVon</code>. Method <code>reHon(SanPham khac)</code> nằm trong <code>SanPham</code> đọc <code>khac.giaVon</code>. Kết quả?",
+  "options":["Lỗi biên dịch: giaVon là private","Lỗi lúc chạy: IllegalAccessError","Biên dịch được, private theo class","Chỉ được nếu khac chính là this"],
+  "answer":2,
+  "why":"<code>private</code> là riêng của <em>class</em>, không phải của object. Code nằm trong class <code>SanPham</code> thì đọc được <code>private</code> của mọi object <code>SanPham</code>. <code>equals</code> đọc <code>o.x</code> cũng nhờ điều này."},
+ {"q":"(Ôn bài 17) Vì sao JDK dynamic proxy chỉ làm được với bean có interface?",
+  "options":["Vì interface chạy nhanh hơn class","Vì proxy implements interface đó","Vì class thường không có bytecode","Vì interface không cần constructor"],
+  "answer":1,
+  "why":"JDK proxy sinh ra một class mới <em>implements</em> các interface bạn đưa vào, rồi chuyển mọi lời gọi cho InvocationHandler. Không có interface thì nó không có gì để \"đóng vai\". Khi đó Spring dùng CGLIB (tạo class con)."}
+]</script>
+
+<h2>9 · Thử thách: gỡ "kim cương"</h2>
+<div class="lab">
+<p>Sửa <code>loi/Diamond.java</code> cho biên dịch được, sao cho <code>new Diamond().keu()</code> in ra <strong>cả hai</strong> tiếng kêu: <code>Chíp chíp + Bíp bíp</code>.</p>
+<p>Gợi ý: override <code>keu()</code> trong <code>Diamond</code>. Để gọi bản default của một interface cụ thể, cú pháp là <code>TenInterface.super.tenMethod()</code>. Nó giống <code>super.method()</code> ở bài 6, nhưng ghi rõ "của interface nào".<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.12.1">[JLS §15.12.1]</a></p>
+<details><summary>Xem lời giải</summary>
+<pre><code>public class Diamond implements Chim, DoChoi {
+    @Override public String keu() { return Chim.super.keu() + " + " + DoChoi.super.keu(); }
+    public static void main(String[] args) { System.out.println(new Diamond().keu()); }
+}</code></pre>
+<div class="expect"><pre><code>Chíp chíp + Bíp bíp</code></pre></div>
+<p>Chú ý phải có <code>public</code>: default method trong interface là <code>public</code>, nên bản override không được hẹp hơn.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: <code>protected</code> còn một luật ngầm</summary>
+<p>Class con ở package khác chỉ đọc được <code>protected</code> qua tham chiếu kiểu <em>chính nó</em> (hoặc con của nó), không qua tham chiếu kiểu class cha.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-6.html#jls-6.6.2">[JLS §6.6.2]</a> Thử trong <code>khach/</code> một class <code>ProtectedTrap extends SanPham</code>:</p>
+<pre><code>void thu(SanPham khac, ProtectedTrap cungLoai) {
+    System.out.println(this.moTa);       // được
+    System.out.println(cungLoai.moTa);   // được
+    System.out.println(khac.moTa);       // ?
+}</code></pre>
+<div class="expect"><pre><code>error: moTa has protected access in SanPham     ← dòng khac.moTa</code></pre></div>
+<p>Lý do: "chi nhánh nhượng quyền" được biết công thức <em>của chính mình</em>, chứ không được đọc công thức trong một object <code>SanPham</code> bất kỳ, vì object đó có thể thuộc một chi nhánh khác hẳn.</p>
+<p>Ngoài ra, từ Java 9, <strong>module</strong> (JPMS) thêm một lớp kiểm soát nữa bên trên: class <code>public</code> trong một package không được module <code>exports</code> thì module khác cũng không dùng được. Đó là lý do bài 10 và 11 phải chạy với <code>--add-opens</code> khi dùng reflection đọc field bên trong <code>java.util</code>.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/java/IandI/abstract.html">Oracle Java Tutorial: Abstract Methods and Classes</a>, có mục "Abstract Classes Compared to Interfaces" rất ngắn gọn. Kèm theo: <a href="https://docs.oracle.com/javase/tutorial/java/javaOO/accesscontrol.html">Controlling Access to Members of a Class</a> (bảng truy cập gốc). Sách: <em>Effective Java</em>, Item 15 và Item 20.</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "Interface có constructor không?", "Khi nào dùng <code>sealed interface</code>?", "Class (không phải member) có được <code>private</code> không?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0017-proxy-va-reflection.html">← Bài 17: Proxy và reflection</a><a href="0019-exception.html">Bài 19: Exception →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>this và super</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1><code>this</code> và <code>super</code> thật ra là gì?</h1>
+<p class="subtitle">Bài 6 · <code>this</code> là một tham số ẩn, <code>super</code> là "gọi bản của cha", và cái bẫy gọi method bị override ngay trong constructor</p>
+<div class="meta"><span>~35 phút</span><span>Cần biết: <a href="0001-tu-source-den-bytecode.html">Bài 1</a> (javap, slot 0), <a href="0005-static-chay-khi-nao.html">Bài 5</a> (thứ tự cha–con)</span><span>Thư mục thực hành: <code>lab/l0006</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Hiểu <code>this</code> là gì ở cấp độ JVM, và vì sao method <code>static</code> không dùng được <code>this</code>.</li>
+  <li>Dùng đúng 4 dạng: <code>this.field</code>, <code>this(...)</code>, <code>super.method()</code>, <code>super(...)</code>.</li>
+  <li>Tránh được một bẫy phỏng vấn kinh điển: gọi method bị override trong constructor của class cha.</li>
+</ul>
+
+<h2>1 · Ôn bài 1 và bài 5 (trả lời trong đầu trước)</h2>
+<div class="callout">
+<p>(a) Trong bytecode của một constructor, lệnh <code>aload_0</code> đẩy cái gì lên stack?</p>
+<p>(b) <code>new Child()</code> lần đầu: thứ tự chạy giữa static và constructor của cha và con là gì?</p>
+<details><summary>Kiểm tra</summary>(a) <code>aload_0</code> đẩy giá trị trong <strong>slot 0</strong>, tức là <code>this</code>. (b) static cha → static con → constructor cha → constructor con. Cả hai câu này đều quay lại trong bài hôm nay.</details></div>
+
+<h2>2 · <code>this</code> là một tham số mà bạn không nhìn thấy</h2>
+
+<div class="analogy">
+<p>Một công ty có quy định chung "nhân viên mặc đồng phục". Quy định đó viết <strong>một lần</strong> cho tất cả. Nhưng khi áp dụng thì luôn là cho <strong>một người cụ thể</strong>: "<em>bạn</em> mặc đồng phục".</p>
+<p>Method trong Java cũng vậy: code chỉ viết một lần trong class, nhưng mỗi lần gọi <code>a.chao(...)</code> hay <code>b.chao(...)</code> thì nó chạy cho một object cụ thể. Method biết "object hiện tại là ai" nhờ một tham số ẩn mà JVM tự truyền vào. Tham số ẩn đó chính là <code>this</code>.</p>
+</div>
+
+<p>Kiểm chứng bằng bytecode. File <code>HiddenThis.java</code> có hai method, mỗi method khai báo <strong>đúng 1 tham số</strong>:</p>
+<pre><code>String chao(String loiChao)        { return loiChao + " " + this.ten; }   // method thường
+static String chaoStatic(String loiChao) { return loiChao; }               // method static</code></pre>
+<pre><code>cd lab/l0006
+javac HiddenThis.java
+javap -v HiddenThis | grep -E 'chao|args_size'
+javap -c HiddenThis</code></pre>
+<div class="expect"><pre><code>  java.lang.String chao(java.lang.String);
+      stack=2, locals=2, <span class="hl">args_size=2</span>      ← khai báo 1 tham số mà có 2!
+  static java.lang.String chaoStatic(java.lang.String);
+      stack=1, locals=1, <span class="hl">args_size=1</span>
+
+java.lang.String chao(java.lang.String);
+   0: aload_1          // slot 1 = loiChao
+   1: <span class="hl">aload_0</span>          // slot 0 = this
+   2: getfield ten     // this.ten
+
+static java.lang.String chaoStatic(java.lang.String);
+   0: aload_0          // slot 0 = loiChao (không có this!)</code></pre></div>
+<ul>
+  <li>Method thường: <code>args_size=2</code> dù chỉ khai báo 1 tham số. Tham số thứ hai, nằm ở <strong>slot 0</strong>, chính là <code>this</code>.</li>
+  <li>Method <code>static</code>: không có <code>this</code>, nên slot 0 là tham số đầu tiên. Đúng như bạn đã thấy ở bài 1 và bài 2.</li>
+</ul>
+<p>Đó là lý do <code>static</code> không dùng được <code>this</code>. Method static không gắn với object nào, nên chẳng có "object hiện tại" để truyền vào. File <code>loi/StaticThis.java</code> thử dùng <code>this</code> trong <code>main</code>:</p>
+<pre><code>javac loi/StaticThis.java</code></pre>
+<div class="expect"><pre><code>loi/StaticThis.java:4: error: non-static variable this cannot be referenced from a static context</code></pre></div>
+
+<div class="remember"><code>this</code> = tham chiếu tới <strong>object đang chạy method</strong>. JVM tự truyền nó vào slot 0 của mọi method không static và mọi constructor.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.8.3">[JLS §15.8.3]</a></div>
+
+<h2>3 · Dạng 1: <code>this.field</code>, khi tên bị "che"</h2>
+<p>Khi tham số trùng tên với field, tên tham số sẽ <strong>che</strong> (shadow) field. Mở <code>Shadow.java</code>:</p>
+<pre><code>String ten;
+void setTenSai(String ten)  { ten = ten; }        // quên this
+void setTenDung(String ten) { this.ten = ten; }   // có this</code></pre>
+<p><strong>Đoán trước:</strong> sau <code>setTenSai("An")</code>, field <code>ten</code> bằng bao nhiêu?</p>
+<pre><code>javac Shadow.java &amp;&amp; java Shadow</code></pre>
+<div class="expect"><pre><code>Sau setTenSai : ten = <span class="bad-hl">null</span>
+Sau setTenDung: ten = An</code></pre></div>
+<p>Trong <code>setTenSai</code>, cả hai chữ <code>ten</code> đều là <strong>tham số</strong>, nên dòng đó chỉ gán tham số cho chính nó. Field không hề được đụng tới. Không có lỗi biên dịch, không có exception, field chỉ âm thầm vẫn là <code>null</code>. <code>this.ten</code> nghĩa là "field <code>ten</code> của object hiện tại", và nó phá được sự che khuất đó.<a class="cite" href="https://docs.oracle.com/javase/tutorial/java/javaOO/thiskey.html">[Oracle Tutorial: Using the this Keyword]</a></p>
+
+<h2>4 · Dạng 2: <code>this(...)</code>, constructor gọi constructor</h2>
+<p>Khi có nhiều constructor, thay vì chép đi chép lại code gán field, một constructor có thể gọi constructor khác bằng <code>this(...)</code>. Mở <code>Chain.java</code>:</p>
+<pre><code>SanPham(String ten, int gia, int soLuong) {    // constructor "đầy đủ"
+    this.ten = ten; this.gia = gia; this.soLuong = soLuong;
+    System.out.println("  constructor 3 tham số chạy");
+}
+SanPham(String ten, int gia) {
+    this(ten, gia, 1);                           // gọi constructor kia, soLuong mặc định 1
+    System.out.println("  constructor 2 tham số chạy");
+}</code></pre>
+<pre><code>javac Chain.java &amp;&amp; java Chain</code></pre>
+<div class="expect"><pre><code>  constructor 3 tham số chạy
+  constructor 2 tham số chạy
+bút / 5000 / 1</code></pre></div>
+<p><code>new SanPham("bút", 5000)</code> vào constructor 2 tham số. Constructor đó gọi ngay <code>this(..., 1)</code>, nên constructor 3 tham số chạy <em>trước</em>, xong mới quay lại chạy phần còn lại. Logic gán field chỉ nằm ở <strong>một chỗ</strong>.</p>
+
+<h2>5 · Dạng 3 và 4: <code>super</code>, gọi bản của cha</h2>
+
+<h3><code>super.method()</code>: mở rộng thay vì viết lại</h3>
+<p>Khi override, đôi khi bạn không muốn <em>thay thế</em> hoàn toàn method của cha, mà muốn <em>thêm vào</em>. Mở <code>SuperCall.java</code>:</p>
+<pre><code>class TaiKhoan {
+    String moTa() { return "Tài khoản thường"; }
+}
+class TaiKhoanVip extends TaiKhoan {
+    @Override
+    String moTa() { return super.moTa() + " + ưu đãi VIP"; }   // gọi bản của CHA rồi thêm
+}</code></pre>
+<pre><code>javac SuperCall.java &amp;&amp; java SuperCall</code></pre>
+<div class="expect"><pre><code>Tài khoản thường + ưu đãi VIP</code></pre></div>
+<p>Nếu viết <code>moTa()</code> (hay <code>this.moTa()</code>) thay vì <code>super.moTa()</code>, method sẽ gọi lại <strong>chính nó</strong>, đệ quy mãi cho tới <code>StackOverflowError</code> (bài 2). <code>super.</code> nghĩa là "bỏ qua bản override của tôi, gọi thẳng bản của class cha".<a class="cite" href="https://docs.oracle.com/javase/tutorial/java/IandI/super.html">[Oracle Tutorial: Using the Keyword super]</a></p>
+
+<h3><code>super(...)</code>: phải là câu lệnh đầu tiên</h3>
+<p>Nhớ lại bài 1: <code>javac</code> tự chèn <code>super()</code> vào đầu mọi constructor. Nếu class cha <strong>không có</strong> constructor không tham số, bạn phải tự gọi <code>super(...)</code> với tham số phù hợp. Và trong Java 21, lời gọi đó phải đứng <strong>đầu tiên</strong>. File <code>loi/SuperNotFirst.java</code> thử làm ngược lại:</p>
+<pre><code>Con() {
+    System.out.println("chạy trước super");
+    super("Bình");
+}</code></pre>
+<pre><code>javac loi/SuperNotFirst.java</code></pre>
+<div class="expect"><pre><code>loi/SuperNotFirst.java:5: error: call to super must be first statement in constructor</code></pre></div>
+<p>Lý do: phần "cha" của object phải được khởi tạo xong trước khi phần "con" chạy. Đây đúng là thứ tự "constructor cha → constructor con" ở bài 5.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.8.7.1">[JLS §8.8.7.1]</a> (Từ Java 25, quy tắc này được nới ra một chút: được phép chạy một số câu lệnh trước <code>super(...)</code>, miễn là không đụng tới <code>this</code>.<a class="cite" href="https://openjdk.org/jeps/513">[JEP 513]</a> Máy bạn đang dùng Java 21, nên vẫn áp dụng quy tắc cũ.)</p>
+
+<table>
+  <tr><th>Dạng</th><th>Nghĩa</th><th>Dùng khi</th></tr>
+  <tr><td><code>this.field</code></td><td>Field của object hiện tại</td><td>Tham số trùng tên với field</td></tr>
+  <tr><td><code>this(...)</code></td><td>Gọi constructor khác của <em>cùng</em> class</td><td>Nhiều constructor, tránh lặp code</td></tr>
+  <tr><td><code>super.method()</code></td><td>Gọi bản method của class <em>cha</em></td><td>Override nhưng muốn mở rộng chứ không thay thế</td></tr>
+  <tr><td><code>super(...)</code></td><td>Gọi constructor của class <em>cha</em></td><td>Cha cần tham số khi khởi tạo; phải đứng đầu tiên (Java 21)</td></tr>
+</table>
+
+<h2>6 · Bẫy kinh điển: gọi method bị override trong constructor của cha</h2>
+<p>Đây là câu phỏng vấn khiến rất nhiều người trả lời sai. Mở <code>ConstructorTrap.java</code>:</p>
+<pre><code>class Cha {
+    Cha() {
+        System.out.println("Cha(): gọi gioiThieu() → " + gioiThieu());
+    }
+    String gioiThieu() { return "tôi là Cha"; }
+}
+class Con extends Cha {
+    private final String ten = layTen();          // "Bình"
+    Con() {
+        super();
+        System.out.println("Con(): gọi gioiThieu() → " + gioiThieu());
+    }
+    @Override
+    String gioiThieu() { return "tôi là Con, tên " + ten; }
+}
+
+new Con();</code></pre>
+<p><strong>Đoán trước:</strong> dòng đầu tiên in ra "tôi là Cha" hay "tôi là Con"? Nếu là Con, tên in ra là gì? (Gợi ý: <code>ten</code> là field <code>final</code>, tức không gán lại được sau khi khởi tạo.)</p>
+<pre><code>javac ConstructorTrap.java &amp;&amp; java ConstructorTrap</code></pre>
+<div class="expect"><pre><code>Cha(): gọi gioiThieu() → tôi là Con, tên <span class="bad-hl">null</span>
+Con(): gọi gioiThieu() → tôi là Con, tên Bình</code></pre></div>
+<p>Hai điều bất ngờ:</p>
+<ol class="flow">
+  <li><strong>Constructor của Cha lại gọi bản của Con.</strong> Object đang được tạo <em>là</em> một <code>Con</code>, nên <code>this</code> trong <code>Cha()</code> trỏ tới object <code>Con</code> đó. Lời gọi <code>gioiThieu()</code> được chọn theo kiểu <em>thật</em> của object, không theo class đang chứa đoạn code.</li>
+  <li><strong>Field <code>final</code> lại là <code>null</code>.</strong> Theo thứ tự ở bài 5, constructor cha chạy <em>trước</em>, rồi các field của con mới được gán (<code>ten = layTen()</code> chạy sau <code>super()</code>). Lúc <code>Cha()</code> chạy, <code>ten</code> vẫn đang mang giá trị mặc định <code>null</code>. Ngay cả <code>final</code> cũng không cứu được.</li>
+</ol>
+
+<div class="remember">
+<strong>Không gọi method có thể bị override từ trong constructor.</strong> Class con có thể override method đó, và nó sẽ chạy khi các field của con <em>chưa được khởi tạo</em>. Kết quả là <code>null</code>, <code>0</code>, hoặc <code>NullPointerException</code>.<br>
+Nếu buộc phải gọi, hãy dùng method <code>private</code>, <code>final</code> hoặc <code>static</code> (những loại không override được).
+</div>
+<p><em>Effective Java</em>, Item 19, ghi đúng quy tắc này: <em>"Constructors must not invoke overridable methods, directly or indirectly."</em></p>
+
+<div class="callout"><strong>Câu phỏng vấn: "this và super khác nhau thế nào? Gọi method bị override trong constructor thì sao?"</strong>
+<p><em>"<code>this</code> là tham chiếu tới object hiện tại, được JVM truyền ngầm vào slot 0 của mọi method không static. Nó dùng để phân biệt field với tham số trùng tên (<code>this.x = x</code>) và để gọi constructor khác trong cùng class (<code>this(...)</code>). <code>super</code> dùng để gọi bản method của class cha (<code>super.m()</code>) và constructor của class cha (<code>super(...)</code>, phải là câu lệnh đầu tiên). Gọi method có thể bị override từ constructor là nguy hiểm: nếu class con override nó, bản của con sẽ chạy khi field của con chưa được khởi tạo, vì constructor cha chạy trước. Kết quả thường là null hoặc NullPointerException."</em></p></div>
+
+<h2>7 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q16"></div>
+<script type="application/json" id="q16">[
+ {"q":"Method thường <code>String chao(String s)</code> khai báo 1 tham số, nhưng <code>javap -v</code> báo <code>args_size=2</code>. Tham số thứ hai là gì?",
+  "options":["Một bản sao của tham số s","Kiểu trả về String của method","Tham chiếu this tới object hiện tại","Class chứa method chao lúc chạy"],
+  "answer":2,"why":"JVM tự truyền <code>this</code> vào slot 0 của mọi method không static. Method static không có tham số ẩn này, nên <code>args_size</code> đúng bằng số tham số khai báo."},
+ {"q":"<code>void setTen(String ten) { ten = ten; }</code>. Gọi <code>setTen(\"An\")</code> xong thì field <code>ten</code> bằng gì?",
+  "options":["Vẫn như cũ, vì chỉ gán tham số cho nó","\"An\", vì Java tự hiểu đó là field","Lỗi biên dịch vì gán biến cho chính nó","Ném NullPointerException lúc chạy"],
+  "answer":0,"why":"Tham số <code>ten</code> che field cùng tên, nên cả hai chữ <code>ten</code> đều là tham số và field không bị đụng tới. Phải viết <code>this.ten = ten</code>."},
+ {"q":"Trong <code>TaiKhoanVip.moTa()</code> (đã override), viết <code>return moTa() + \" VIP\";</code> thay vì <code>super.moTa()</code>. Chuyện gì xảy ra?",
+  "options":["Gọi bản của cha, chạy đúng như mong đợi","Lỗi biên dịch vì thiếu chữ super","Trả về null vì cha chưa khởi tạo","Gọi lại chính nó mãi tới StackOverflowError"],
+  "answer":3,"why":"<code>moTa()</code> (tức <code>this.moTa()</code>) gọi bản override, tức là chính method đang chạy, nên đệ quy không dừng. <code>super.moTa()</code> mới gọi thẳng bản của class cha."},
+ {"q":"Constructor <code>Cha()</code> gọi method <code>gioiThieu()</code>, và class <code>Con</code> override method này để dùng field <code>ten</code> của Con. <code>new Con()</code> thì lời gọi trong <code>Cha()</code> thấy gì?",
+  "options":["Bản của Cha, vì đang ở trong Cha()","Bản của Con, nhưng field ten vẫn là null","Bản của Con, và ten đã có giá trị đúng","Lỗi biên dịch vì gọi method trong constructor"],
+  "answer":1,"why":"Object thật là <code>Con</code> nên bản override của Con được gọi. Nhưng constructor cha chạy trước khi field của con được gán, nên <code>ten</code> vẫn là giá trị mặc định <code>null</code>."},
+ {"q":"(Ôn bài 5) <code>class Con extends Cha</code>, cả hai có khối <code>static</code>. Lần đầu gọi <code>new Con()</code>, thứ tự chạy là gì?",
+  "options":["static Cha, Cha(), static Con, Con()","static Con, static Cha, Con(), Cha()","static Cha, static Con, Cha(), Con()","Cha(), Con(), static Cha, static Con"],
+  "answer":2,"why":"Class phải được khởi tạo (static) trước khi tạo object, và cha khởi tạo trước con. Sau đó mới tới constructor: <code>Con()</code> gọi <code>super()</code> nên phần của Cha chạy xong trước."}
+]</script>
+
+<h2>8 · Thử thách: sửa <code>ConstructorTrap.java</code></h2>
+<div class="lab">
+<p><strong>Nhiệm vụ:</strong> sửa <code>ConstructorTrap.java</code> sao cho không còn dòng nào in ra <code>null</code>. Có nhiều cách. Hãy thử ít nhất một cách, rồi giải thích vì sao nó hiệu quả.</p>
+<p>Gợi ý:</p>
+<ul>
+  <li>Cách A: đừng gọi <code>gioiThieu()</code> trong constructor của <code>Cha</code> nữa. Ai cần thì gọi sau khi object đã tạo xong.</li>
+  <li>Cách B: trong <code>Cha()</code>, gọi một method <code>private</code> của Cha thay vì <code>gioiThieu()</code>. Method private không bị override.</li>
+</ul>
+<details><summary>Xem một lời giải (cách A)</summary>
+<pre><code>static class Cha {
+    Cha() {
+        System.out.println("Cha(): khởi tạo xong phần của Cha");   // không gọi method override được
+    }
+    String gioiThieu() { return "tôi là Cha"; }
+}
+...
+public static void main(String[] args) {
+    Con c = new Con();
+    System.out.println(c.gioiThieu());     // gọi SAU khi object đã khởi tạo xong
+}</code></pre>
+<div class="expect"><pre><code>Cha(): khởi tạo xong phần của Cha
+tôi là Con, tên Bình</code></pre></div>
+<p>Khi constructor đã chạy xong hết, mọi field đều đã có giá trị đúng. Gửi cách giải của bạn cho agent để được nhận xét.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: <code>this</code> bị lộ ra ngoài khi constructor chưa xong</summary>
+<p>Có một biến thể nguy hiểm hơn của bẫy ở mục 6: constructor <strong>đưa <code>this</code> ra ngoài</strong> trước khi chạy xong, ví dụ đăng ký <code>this</code> làm listener, bỏ <code>this</code> vào một list static, hoặc khởi động một thread dùng <code>this</code>. Nơi nhận có thể dùng object khi field của nó chưa được gán.</p>
+<p>Điều này còn phá luôn đảm bảo của field <code>final</code> (sẽ học kỹ ở bài 16): JLS §17.5 chỉ đảm bảo các thread khác thấy đúng giá trị field <code>final</code> nếu <em>"do not write a reference to the object being constructed in a place where another thread can see it before the object's constructor is finished"</em>.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.5">[JLS §17.5]</a> Tóm lại: <strong>constructor chỉ nên làm một việc là khởi tạo field, không gọi method có thể bị override, và không đưa <code>this</code> ra ngoài.</strong></p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/java/javaOO/thiskey.html">Oracle Java Tutorial: Using the this Keyword</a> và <a href="https://docs.oracle.com/javase/tutorial/java/IandI/super.html">Using the Keyword super</a>. Hai trang ngắn, dễ đọc. Để hiểu bẫy ở mục 6: <em>Effective Java</em>, Item 19 "Design and document for inheritance or else prohibit it".</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "<code>this</code> trong lambda trỏ tới đâu?", "<code>super.super.method()</code> có được không?", "constructor có được gọi cả <code>this(...)</code> lẫn <code>super(...)</code> không?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0005-static-chay-khi-nao.html">← Bài 5: Static chạy khi nào</a><a href="0007-overriding-overloading.html">Bài 7: Overloading và Overriding →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

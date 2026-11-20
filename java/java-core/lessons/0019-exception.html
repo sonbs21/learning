@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exception trong Java</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Exception: báo lỗi, dọn dẹp, và cái giá của stack trace</h1>
+<p class="subtitle">Bài 19 · Checked vs unchecked, <code>finally</code>, try-with-resources, vì sao tạo exception lại tốn kém, và vì sao log production đôi khi chỉ ghi <code>NullPointerException: null</code></p>
+<div class="meta"><span>~45 phút</span><span>Cần biết: <a href="0008-jit-warm-up.html">Bài 8</a> (JIT), <a href="0017-proxy-va-reflection.html">Bài 17</a> (proxy, @Transactional)</span><span>Thư mục thực hành: <code>lab/l0019</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Phân biệt checked, unchecked và <code>Error</code>, và biết vì sao Spring chỉ rollback với một loại.</li>
+  <li>Đoán đúng thứ tự chạy của <code>try</code>/<code>catch</code>/<code>finally</code>, kể cả khi có <code>return</code>.</li>
+  <li>Dùng try-with-resources đúng cách, và hiểu vì sao nó tốt hơn <code>finally</code> kiểu cũ.</li>
+  <li>Biết exception tốn ở đâu, và đọc được log production khi stack trace "biến mất".</li>
+</ul>
+
+<h2>1 · Ôn bài 17 và bài 8 (trả lời trong đầu trước)</h2>
+<div class="callout">
+<p>(a) Với <code>@Transactional</code>, ai mở và đóng (commit/rollback) transaction cho method của bạn?</p>
+<p>(b) Code chạy càng nhiều lần thì JIT làm gì với nó?</p>
+<details><summary>Kiểm tra</summary>(a) Proxy do Spring tạo ra, đứng giữa người gọi và bean của bạn. Proxy quyết định commit hay rollback dựa vào <em>loại exception</em> bay ra khỏi method, như bạn sẽ thấy ở mục 2. (b) Biên dịch sang mã máy và tối ưu mạnh tay. Mục 6 cho thấy một tối ưu của JIT có thể làm stack trace biến mất.</details></div>
+
+<h2>2 · Ba loại "sự cố": cây gia phả của exception</h2>
+<div class="analogy">
+<p>Quán cà phê gặp ba kiểu sự cố:</p>
+<ul>
+  <li><strong>Hết sữa, nhà cung cấp giao trễ:</strong> chuyện <em>ngoài tầm kiểm soát</em> nhưng biết trước sẽ có lúc xảy ra. Quản lý bắt buộc mọi ca phải có phương án. Đây là <strong>checked exception</strong>.</li>
+  <li><strong>Nhân viên pha nhầm công thức:</strong> lỗi <em>do chính mình</em>, sửa quy trình chứ không cần kế hoạch dự phòng cho từng ly. Đây là <strong>unchecked exception</strong> (<code>RuntimeException</code>).</li>
+  <li><strong>Mất điện cả toà nhà:</strong> quán không tự xử lý được. Đây là <strong><code>Error</code></strong>.</li>
+</ul>
+</div>
+<p><code>CayException.java</code> in ra "cây gia phả" của vài exception quen thuộc:</p>
+<pre><code>cd lab/l0019
+javac CayException.java
+java CayException</code></pre>
+<div class="expect"><pre><code>IOException → Exception → Throwable → Object
+SQLException → Exception → Throwable → Object
+IllegalArgumentException → <span class="hl">RuntimeException</span> → Exception → Throwable → Object
+NullPointerException → <span class="hl">RuntimeException</span> → Exception → Throwable → Object
+OutOfMemoryError → VirtualMachineError → <span class="hl">Error</span> → Throwable → Object</code></pre></div>
+<table>
+<tr><th>Loại</th><th>Là gì</th><th>Ví dụ</th><th>Compiler có bắt xử lý?</th></tr>
+<tr><td><strong>Checked</strong></td><td>Con của <code>Exception</code> nhưng <em>không</em> qua <code>RuntimeException</code></td><td><code>IOException</code>, <code>SQLException</code></td><td><strong>Có</strong>: phải <code>catch</code> hoặc khai báo <code>throws</code></td></tr>
+<tr><td><strong>Unchecked</strong></td><td>Con của <code>RuntimeException</code></td><td><code>NullPointerException</code>, <code>IllegalArgumentException</code></td><td>Không</td></tr>
+<tr><td><strong>Error</strong></td><td>Con của <code>Error</code>: JVM gặp sự cố nghiêm trọng</td><td><code>OutOfMemoryError</code>, <code>StackOverflowError</code> (bài 2, 9)</td><td>Không, và thường không nên bắt</td></tr>
+</table>
+<p>Chữ "checked" nghĩa là <strong>compiler kiểm tra</strong>.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-11.html#jls-11.1.1">[JLS §11.1.1]</a> <code>loi/ChuaXuLy.java</code> gọi <code>Files.readString</code> (có thể ném <code>IOException</code>) mà không xử lý:</p>
+<pre><code>javac loi/ChuaXuLy.java</code></pre>
+<div class="expect"><pre><code>loi/ChuaXuLy.java:6: error: <span class="hl">unreported exception IOException; must be caught or declared to be thrown</span></code></pre></div>
+<p>Đây hoàn toàn là luật của <em>compiler</em>. Lúc chạy, JVM đối xử với checked và unchecked y như nhau.</p>
+
+<p><strong>Liên hệ Spring: vì sao <code>@Transactional</code> "không rollback"?</strong> Mặc định, proxy của Spring chỉ rollback khi method ném ra <strong>unchecked exception</strong> (hoặc <code>Error</code>). Gặp checked exception, nó vẫn <strong>commit</strong>.<a class="cite" href="https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/rolling-back.html">[Spring: Rolling Back a Declarative Transaction]</a> Bạn ném <code>IOException</code> giữa chừng và tưởng dữ liệu đã được hoàn tác, nhưng thật ra một nửa đã được lưu. Muốn rollback cả checked exception thì phải ghi rõ: <code>@Transactional(rollbackFor = Exception.class)</code>.</p>
+
+<div class="remember"><strong>Checked</strong> (con của <code>Exception</code>, không qua <code>RuntimeException</code>): compiler bắt phải xử lý. <strong>Unchecked</strong> (con của <code>RuntimeException</code>): không bắt buộc. Spring mặc định <strong>chỉ rollback với unchecked</strong>.</div>
+
+<h2>3 · <code>finally</code>: luôn chạy, kể cả khi đã <code>return</code></h2>
+<p><code>finally</code> là phần "dọn dẹp" luôn được chạy, dù <code>try</code> kết thúc bình thường, bằng <code>return</code>, hay bằng exception. <code>Finally.java</code>:</p>
+<pre><code>static String laySo() {
+    try {
+        System.out.println("  try: chuẩn bị return");
+        return "từ try";
+    } finally {
+        System.out.println("  finally: vẫn chạy dù try đã return");
+    }
+}
+
+static String nuotLoi() {
+    try {
+        throw new IllegalStateException("lỗi quan trọng");
+    } finally {
+        return "finally return đè lên";      // KHÔNG BAO GIỜ làm thế này
+    }
+}</code></pre>
+<pre><code>javac Finally.java
+java Finally</code></pre>
+<div class="expect"><pre><code>  try: chuẩn bị return
+  finally: vẫn chạy dù try đã return
+Kết quả: từ try
+Kết quả: <span class="hl">finally return đè lên</span></code></pre></div>
+<ul>
+  <li>Hàm thứ nhất: <code>return</code> trong <code>try</code> không bỏ qua được <code>finally</code>. Finally chạy xong, giá trị "từ try" mới được trả về.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-14.html#jls-14.20.2">[JLS §14.20.2]</a></li>
+  <li>Hàm thứ hai là một bẫy: <code>return</code> trong <code>finally</code> <strong>nuốt mất exception</strong>. Lỗi "quan trọng" biến mất không dấu vết, người gọi tưởng mọi thứ ổn. Compiler chỉ cảnh báo (<code>-Xlint:finally</code>), không chặn.</li>
+</ul>
+
+<h2>4 · try-with-resources: dọn dẹp mà không làm mất lỗi</h2>
+<p>Kết nối database, file, socket... dùng xong <strong>phải đóng</strong>, nếu không sẽ cạn tài nguyên (ví dụ connection pool hết kết nối, app treo). Cách cũ là đóng trong <code>finally</code>. Nhưng nếu chính việc đóng cũng lỗi thì sao? <code>TaiNguyen.java</code> có một "kết nối" mà <code>close()</code> ném lỗi, thử theo hai cách:</p>
+<pre><code>// Kiểu cũ
+KetNoi k = new KetNoi("DB", true);
+try {
+    throw new RuntimeException("lỗi khi truy vấn");      // lỗi gốc
+} finally {
+    k.close();                                          // close cũng lỗi → ?
+}
+
+// Kiểu mới: try-with-resources
+try (KetNoi db = new KetNoi("DB", true); KetNoi file = new KetNoi("File", false)) {
+    throw new RuntimeException("lỗi khi truy vấn");
+}</code></pre>
+<pre><code>javac TaiNguyen.java
+java TaiNguyen</code></pre>
+<div class="expect"><pre><code>--- try/finally kiểu cũ:
+  mở DB
+  đóng DB
+Bắt được: <span class="hl">lỗi khi đóng DB</span>
+--- try-with-resources:
+  mở DB
+  mở File
+  đóng File
+  đóng DB
+Bắt được: lỗi khi truy vấn
+  kèm theo (suppressed): lỗi khi đóng DB</code></pre></div>
+<ol class="flow">
+  <li><strong>Kiểu cũ làm mất lỗi gốc.</strong> Exception từ <code>close()</code> đè lên "lỗi khi truy vấn". Trong log bạn chỉ thấy "lỗi khi đóng DB" và đi tìm nhầm chỗ.</li>
+  <li><strong>try-with-resources giữ lỗi gốc</strong>, và gắn lỗi khi đóng vào làm <strong>suppressed</strong> (lấy ra bằng <code>getSuppressed()</code>, và được in kèm trong stack trace). Không mất thông tin nào.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-14.html#jls-14.20.3">[JLS §14.20.3]</a></li>
+  <li><strong>Đóng theo thứ tự ngược</strong>: mở DB rồi File, thì đóng File rồi DB. Giống xếp chồng đĩa: cái đặt sau lấy ra trước.</li>
+  <li>Tài nguyên nào dùng được trong <code>try (...)</code>? Bất kỳ class nào implements <code>AutoCloseable</code> (bài 18). <code>Connection</code>, <code>InputStream</code>, <code>ExecutorService</code> (Java 19+, bài 15) đều thế.</li>
+</ol>
+
+<div class="remember">Có tài nguyên cần đóng → <strong>luôn dùng try-with-resources</strong>. Nó đóng tự động, đóng theo thứ tự ngược, và không bao giờ để lỗi khi đóng che mất lỗi gốc. Không bao giờ <code>return</code> trong <code>finally</code>.</div>
+
+<h2>5 · Tạo exception tốn ở đâu?</h2>
+<p>Lúc được tạo ra, exception <strong>chụp lại toàn bộ call stack</strong> (method nào gọi method nào, dòng bao nhiêu) để sau này in stack trace. Việc chụp này nằm trong <code>fillInStackTrace()</code>, và stack càng sâu thì càng tốn. <code>ChiPhi.java</code> tạo exception ở đáy một chuỗi gọi đệ quy sâu 10 hoặc 200 tầng, đo sau khi đã làm nóng JIT (bài 8). Ngoài ra nó có một loại exception tắt việc chụp stack (constructor đặc biệt của <code>Throwable</code> với <code>writableStackTrace = false</code>).<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Throwable.html#%3Cinit%3E(java.lang.String,java.lang.Throwable,boolean,boolean)">[Throwable constructor]</a></p>
+<pre><code>javac ChiPhi.java
+java ChiPhi</code></pre>
+<div class="expect"><pre><code>Có stack trace, sâu 10 tầng : 762 ns/lần
+Có stack trace, sâu 200 tầng: <span class="hl">5618 ns/lần</span>
+Không stack trace, sâu 200  : 581 ns/lần
+Tạo object thường, sâu 200  : (để so sánh) 562 ns/lần</code></pre></div>
+<ul>
+  <li>Ở độ sâu 200, chụp stack tốn khoảng <strong>5000 ns</strong> mỗi lần, gấp khoảng 10 lần so với không chụp. Không chụp stack thì exception rẻ ngang một object thường (phần ~560 ns còn lại là chi phí của 200 lần gọi đệ quy).</li>
+  <li>Ứng dụng Spring thường có stack <strong>rất sâu</strong> (filter, proxy, controller, service... thường trên 100 tầng), nên chi phí này là có thật.</li>
+  <li>Kết luận thực tế: <strong>đừng dùng exception để điều khiển luồng bình thường</strong> (ví dụ ném exception để báo "không tìm thấy" hàng nghìn lần mỗi giây). Exception dành cho tình huống <em>bất thường</em>. Còn thỉnh thoảng ném một lần thì vài micro giây không đáng lo.</li>
+</ul>
+<p>(Các con số trên máy bạn sẽ khác, nhưng tỉ lệ thì tương tự.)</p>
+
+<h2>6 · Khi stack trace biến mất trên production</h2>
+<p>Đây là tình huống debug thật: log production đầy dòng <code>java.lang.NullPointerException</code>, <strong>không có message, không có stack trace</strong>. Lý do là một tối ưu của JIT. <code>MatStack.java</code> cố tình gây <code>NullPointerException</code> một triệu lần, và dừng lại ngay khi stack trace trống:</p>
+<pre><code>static int doDai(String s) { return s.length(); }       // s = null → NullPointerException
+
+for (int i = 1; i &lt;= 1_000_000; i++) {
+    try { doDai(null); }
+    catch (NullPointerException e) {
+        if (i == 1 || e.getStackTrace().length == 0) { /* in message và độ dài stack trace */ }
+    }
+}</code></pre>
+<pre><code>javac MatStack.java
+java MatStack
+java -XX:-OmitStackTraceInFastThrow MatStack</code></pre>
+<div class="expect"><pre><code>Lần 1: message = Cannot invoke "String.length()" because "&lt;parameter1&gt;" is null
+    stack trace dài 2 dòng
+Lần <span class="hl">5258</span>: message = <span class="hl">null</span>
+    stack trace dài <span class="hl">0 dòng</span>
+---
+Lần 1: message = Cannot invoke "String.length()" because "&lt;parameter1&gt;" is null
+    stack trace dài 2 dòng
+Chạy hết 1 000 000 lần, stack trace vẫn đầy đủ</code></pre></div>
+<ol class="flow">
+  <li>Những lần đầu, NPE có đủ message và stack trace. (Message chi tiết "because ... is null" có từ Java 14.<a class="cite" href="https://openjdk.org/jeps/358">[JEP 358]</a> Nó ghi <code>&lt;parameter1&gt;</code> vì file được biên dịch không có <code>-g</code>; biên dịch với <code>javac -g</code> thì sẽ hiện tên biến <code>s</code>.)</li>
+  <li>Sau vài nghìn lần, JIT thấy chỗ này ném NPE liên tục, nên <strong>dùng lại một object exception tạo sẵn</strong> để khỏi tốn công chụp stack (đúng chi phí ở mục 5). Object dùng lại đó không có message, không có stack trace.</li>
+  <li>Cờ <code>-XX:-OmitStackTraceInFastThrow</code> tắt tối ưu này: stack trace luôn đầy đủ.</li>
+</ol>
+<div class="remember">Log production toàn <code>NullPointerException</code> trống trơn → lỗi đã xảy ra <strong>rất nhiều lần</strong>. Hãy <strong>tìm những dòng log đầu tiên</strong> của lỗi đó (lúc JIT chưa tối ưu, stack trace còn đầy đủ), hoặc chạy lại với <code>-XX:-OmitStackTraceInFastThrow</code>.</div>
+
+<h2>7 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q22"></div>
+<script type="application/json" id="q22">[
+ {"q":"Method gọi <code>Files.readString(...)</code> (ném <code>IOException</code>) nhưng không có <code>try/catch</code> lẫn <code>throws</code>. Chuyện gì xảy ra?",
+  "options":["Chạy được, chỉ lỗi khi file không có","Chạy được, IOException bị bỏ qua","Lỗi biên dịch: unreported exception","JVM tự bọc thành RuntimeException"],
+  "answer":2,
+  "why":"<code>IOException</code> là checked exception: compiler bắt buộc phải <code>catch</code> hoặc khai báo <code>throws</code>. Đây là luật lúc biên dịch, không phải lúc chạy."},
+ {"q":"Method <code>@Transactional</code> lưu 2 bảng, lưu xong bảng đầu thì ném <code>IOException</code> (checked). Mặc định Spring làm gì?",
+  "options":["Vẫn commit phần đã lưu","Rollback toàn bộ transaction","Treo transaction tới khi timeout","Tự retry lại cả method một lần"],
+  "answer":0,
+  "why":"Mặc định Spring chỉ rollback với unchecked exception (<code>RuntimeException</code>) và <code>Error</code>. Checked exception thì vẫn commit. Muốn rollback cần <code>rollbackFor = Exception.class</code>."},
+ {"q":"Khối <code>try</code> ném exception A, rồi <code>finally</code> có <code>return \"ok\";</code>. Người gọi nhận được gì?",
+  "options":["Exception A như bình thường","Exception A kèm suppressed","Lỗi biên dịch vì return trong finally","Giá trị \"ok\", exception A biến mất"],
+  "answer":3,
+  "why":"<code>return</code> trong <code>finally</code> kết thúc method bình thường và nuốt mất exception đang bay. Compiler chỉ cảnh báo. Không bao giờ return trong finally."},
+ {"q":"Trong try-with-resources, thân <code>try</code> ném lỗi X, rồi <code>close()</code> ném lỗi Y. <code>catch</code> bắt được gì?",
+  "options":["Y, vì close chạy sau cùng","X, còn Y nằm trong getSuppressed()","Cả hai, gộp thành một exception mới","X, còn Y bị mất hoàn toàn"],
+  "answer":1,
+  "why":"try-with-resources giữ lỗi gốc X và gắn Y vào làm suppressed. Kiểu <code>finally</code> cũ thì ngược lại: Y đè mất X."},
+ {"q":"(Ôn bài 8) Log production có hàng nghìn dòng <code>NullPointerException</code> không message, không stack trace. Nguyên nhân hợp lý nhất?",
+  "options":["Logger bị cấu hình sai định dạng","Code được biên dịch thiếu cờ -g","JIT dùng lại exception tạo sẵn","Exception bị GC dọn mất stack trace"],
+  "answer":2,
+  "why":"Khi một chỗ ném NPE liên tục, JIT (C2) thay bằng một exception tạo sẵn không có stack trace để tiết kiệm. Tìm log những lần đầu, hoặc chạy với <code>-XX:-OmitStackTraceInFastThrow</code>."}
+]</script>
+
+<h2>8 · Thử thách: đoán 9 dòng output</h2>
+<div class="lab">
+<p><code>Challenge.java</code>. <strong>Viết ra giấy toàn bộ output trước khi chạy.</strong></p>
+<pre><code>record R(String ten) implements AutoCloseable {
+    R { System.out.println("mở " + ten); }
+    public void close() { System.out.println("đóng " + ten); }
+}
+
+static int dem() {
+    int x = 1;
+    try {
+        return x;
+    } finally {
+        x = 99;
+        System.out.println("finally: x = " + x);
+    }
+}
+
+static void doiLoi() {
+    try {
+        throw new RuntimeException("A");
+    } catch (RuntimeException e) {
+        throw new IllegalStateException("B");
+    } finally {
+        System.out.println("finally của doiLoi");
+    }
+}
+
+public static void main(String[] args) {
+    System.out.println("dem() = " + dem());
+    try { doiLoi(); } catch (Exception e) { System.out.println("bắt: " + e.getMessage()); }
+    try (R a = new R("1"); R b = new R("2")) {
+        System.out.println("thân try");
+    }
+}</code></pre>
+<p>Câu khó nhất: <code>dem()</code> trả về 1 hay 99?</p>
+<details><summary>Xem đáp án</summary>
+<pre><code>javac Challenge.java
+java Challenge</code></pre>
+<div class="expect"><pre><code>finally: x = 99
+dem() = 1
+finally của doiLoi
+bắt: B
+mở 1
+mở 2
+thân try
+đóng 2
+đóng 1</code></pre></div>
+<ul>
+  <li><strong><code>dem() = 1</code>:</strong> lúc chạy <code>return x</code>, giá trị 1 đã được <em>chép ra</em> để trả về (pass-by-value, bài 2), rồi mới chạy <code>finally</code>. Gán <code>x = 99</code> trong finally không đổi được giá trị đã chép. Dòng "finally" in <em>trước</em> dòng "dem() =", vì finally chạy xong method mới thật sự trả về.</li>
+  <li><strong><code>bắt: B</code>:</strong> exception mới ném trong <code>catch</code> thay thế A. <code>finally</code> vẫn chạy trước khi B bay ra ngoài. (Muốn giữ A, viết <code>new IllegalStateException("B", e)</code> để A thành <em>cause</em>.)</li>
+  <li><strong>Mở 1, 2 nhưng đóng 2, 1:</strong> try-with-resources đóng theo thứ tự ngược.</li>
+</ul>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: bọc exception sao cho không mất dấu (cause)</summary>
+<p>Khi bắt một exception cấp thấp (ví dụ <code>SQLException</code>) rồi ném exception cấp cao hơn (ví dụ <code>OrderException</code>), luôn truyền exception gốc làm <strong>cause</strong>: <code>throw new OrderException("Không lưu được đơn", e);</code>. Khi in stack trace, Java in thêm phần <code>Caused by: java.sql.SQLException: ...</code> ngay bên dưới, và đó thường là dòng quan trọng nhất khi debug.</p>
+<p>Đọc stack trace Spring trên production: cuộn xuống dòng <strong><code>Caused by:</code> cuối cùng</strong>. Đó là lỗi gốc. Các tầng phía trên chỉ là những lớp bọc. Đây cũng là cách Spring làm: nó bọc <code>SQLException</code> (checked) thành <code>DataAccessException</code> (unchecked), để code của bạn không phải viết <code>throws</code> khắp nơi, và để transaction rollback đúng.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://dev.java/learn/exceptions/">dev.java: Exceptions</a> (loạt bài chính thức của Oracle, có phần checked/unchecked và try-with-resources). Spring: <a href="https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/rolling-back.html">Rolling Back a Declarative Transaction</a>. Sách: <em>Effective Java</em>, chương 10 (Item 69 "Use exceptions only for exceptional conditions", Item 70 checked vs runtime), Item 9 "Prefer try-with-resources to try-finally".</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "Có nên bắt <code>Exception</code> chung chung không?", "Tự viết exception thì nên kế thừa <code>Exception</code> hay <code>RuntimeException</code>?", "<code>catch (Throwable t)</code> có nguy hiểm không?"... Nhớ gửi kết quả quiz và đáp án đoán của thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0018-interface-abstract-access.html">← Bài 18: Interface, abstract class, access modifier</a><a href="0020-generics.html">Bài 20: Generics và type erasure →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

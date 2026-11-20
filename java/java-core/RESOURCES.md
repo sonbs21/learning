@@ -44,6 +44,24 @@
   Công cụ benchmark chuẩn. Use for: bất cứ khi nào cần đo hiệu năng nghiêm túc.
 - [OpenJDK JEPs](https://openjdk.org/jeps/0)
   Use for: lý do thiết kế của từng tính năng (ví dụ JEP 280: string concat bằng `invokedynamic`).
+- [Oracle Java Tutorial — Overriding and Hiding Methods](https://docs.oracle.com/javase/tutorial/java/IandI/override.html)
+  Ngắn, dễ đọc. Use for: override vs hiding (static), bảng tóm tắt.
+- [JLS §15.12.2 — Compile-Time Step 2: Determine Method Signature](https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.12.2)
+  Luật chọn overload (3 vòng: không boxing → boxing → varargs; most specific). Use for: trích dẫn, giải thích bẫy overload.
+- [Oracle Java Tutorial — Abstract Methods and Classes](https://docs.oracle.com/javase/tutorial/java/IandI/abstract.html) và [Controlling Access to Members](https://docs.oracle.com/javase/tutorial/java/javaOO/accesscontrol.html)
+  Use for: so sánh interface/abstract class, bảng 4 mức truy cập.
+- [Oracle Java Tutorial — Generics](https://docs.oracle.com/javase/tutorial/java/generics/index.html) (đặc biệt Type Erasure, Guidelines for Wildcard Use)
+  Use for: erasure, wildcard, PECS. Kèm JLS §4.6 (erasure), §4.12.2 (heap pollution), §10.5 (ArrayStoreException).
+- [Brian Goetz — Translation of Lambda Expressions](https://cr.openjdk.org/~briangoetz/lambda/lambda-translation.html)
+  Người thiết kế lambda giải thích invokedynamic + LambdaMetafactory. Use for: lambda bên dưới.
+- [Javadoc java.util.stream (package summary)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/stream/package-summary.html) và [dev.java: Lambdas](https://dev.java/learn/lambdas/), [dev.java: Streams](https://dev.java/learn/api/streams/)
+  Use for: laziness, side-effects, parallel; bài đọc dễ cho người mới.
+- [Oracle Java Tutorial — Nested Classes](https://docs.oracle.com/javase/tutorial/java/javaOO/nested.html)
+  Use for: inner vs static nested, local/anonymous class, khi nào dùng loại nào. Kèm JLS §8.1.3, Effective Java Item 24.
+- [dev.java — Exceptions](https://dev.java/learn/exceptions/) và [Spring — Rolling Back a Declarative Transaction](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/rolling-back.html)
+  Use for: checked/unchecked, try-with-resources; Spring chỉ rollback unchecked mặc định. Kèm JLS §11, §14.20.2–3, JEP 358.
+- [Javadoc TreeMap](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/TreeMap.html), [LinkedHashMap](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/LinkedHashMap.html), [Comparable](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Comparable.html)
+  Use for: NavigableMap (floor/ceiling/subMap), LRU bằng removeEldestEntry, "consistent with equals".
 
 ## Wisdom (Communities)
 

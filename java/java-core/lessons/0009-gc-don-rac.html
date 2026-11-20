@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GC dọn rác</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Ai dọn rác trong Java, và khi nào thì dọn không nổi?</h1>
+<p class="subtitle">Bài 9 · Garbage Collector (GC), đọc GC log, và lỗi <code>OutOfMemoryError</code> ngoài production</p>
+<div class="meta"><span>~35 phút</span><span>Cần biết: <a href="0004-string-pool.html">Bài 4</a> (biến giữ tham chiếu)</span><span>Thư mục thực hành: <code>lab/l0009</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Biết khi nào một object trở thành <strong>rác</strong> và được GC dọn đi.</li>
+  <li>Đọc được một dòng GC log, và nhận ra dấu hiệu của <strong>memory leak</strong> (rò rỉ bộ nhớ).</li>
+  <li>Hiểu vì sao Java có GC mà vẫn bị <code>OutOfMemoryError</code>, và biết bật heap dump để điều tra.</li>
+</ul>
+
+<h2>1 · Ôn bài 4 (trả lời trong đầu trước)</h2>
+<div class="callout">Biến kiểu object (ví dụ <code>String s</code>) chứa gì: chứa nguyên object, hay chứa thứ gì khác?
+<details><summary>Kiểm tra</summary>Biến chỉ chứa <strong>tham chiếu</strong>, tức "tờ giấy ghi vị trí" của object. Object thật nằm trong một vùng nhớ chung tên là <strong>heap</strong>. Bài hôm nay hỏi tiếp: khi không còn tờ giấy nào ghi vị trí của một object, chuyện gì xảy ra với object đó?</details></div>
+
+<h2>2 · Câu chuyện: những quả bóng bay</h2>
+
+<div class="analogy">
+<p>Hình dung mỗi object là một <strong>quả bóng bay</strong>, và mỗi tham chiếu là một <strong>sợi dây</strong>.</p>
+<ul>
+  <li>Bóng đang có người <strong>cầm dây</strong> thì còn được dùng.</li>
+  <li>Một quả bóng có thể buộc vào một quả bóng khác. Chỉ cần quả kia đang có người cầm thì quả này cũng vẫn được giữ.</li>
+  <li>Bóng mà <strong>không còn ai cầm dây</strong>, kể cả gián tiếp, thì không ai dùng được nữa. Nó là <strong>rác</strong>.</li>
+</ul>
+<p>Có một <strong>người dọn dẹp</strong> thỉnh thoảng đi một vòng: lần theo từng sợi dây bắt đầu từ tay mọi người, đánh dấu những quả bóng còn được giữ, rồi <strong>gom hết những quả còn lại</strong> đi.</p>
+</div>
+
+<table>
+  <tr><th>Trong câu chuyện</th><th>Trong Java</th></tr>
+  <tr><td>Quả bóng bay</td><td>Object nằm trong <span class="term">heap</span></td></tr>
+  <tr><td>Sợi dây</td><td>Tham chiếu (biến, field, phần tử trong List...)</td></tr>
+  <tr><td>Tay người đang cầm dây</td><td><span class="term">GC root</span>: biến trong các method <em>đang chạy</em>, và biến <code>static</code></td></tr>
+  <tr><td>Người dọn dẹp</td><td><span class="term">GC</span> (Garbage Collector, trình dọn rác)</td></tr>
+</table>
+
+<div class="remember">Một object là <strong>rác</strong> khi GC không thể đi tới nó từ bất kỳ GC root nào. GC <strong>không</strong> quan tâm bạn còn "định dùng" object đó hay không. Nó chỉ quan tâm object còn bị giữ hay không.</div>
+<p>Vì vậy trong Java, bạn <strong>không bao giờ phải tự xoá object</strong> như ở C/C++. Chỉ cần thả hết dây ra là GC sẽ tự lo phần còn lại.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/gctuning/introduction-garbage-collection-tuning.html">[Oracle GC Tuning Guide]</a></p>
+
+<h2>3 · Thí nghiệm 1: tạo 1 000 MB rác trong 32 MB bộ nhớ</h2>
+<p>Mở <code>Temp.java</code>:</p>
+<pre><code>static byte[] last;   // chỉ giữ object MỚI NHẤT
+
+public static void main(String[] args) {
+    for (int i = 1; i &lt;= 100_000; i++) {
+        last = new byte[10_000];   // ~10 KB; object cũ không còn ai giữ → thành rác
+    }
+    System.out.println("Đã tạo 100 000 object (~1 000 MB). Xong, không lỗi!");
+}</code></pre>
+<p>Mỗi vòng lặp tạo một mảng mới khoảng 10 KB và gán vào <code>last</code>. Mảng của vòng <em>trước</em> lúc đó không còn sợi dây nào, nên nó thành rác.</p>
+<p>Ta sẽ chạy với cờ <code>-Xmx32m</code>, nghĩa là "heap được dùng <strong>tối đa 32 MB</strong>". Chương trình tạo tổng cộng khoảng 1 000 MB, tức gấp 30 lần heap. <strong>Đoán trước:</strong> chương trình có sập không?</p>
+<pre><code>cd lab/l0009
+javac Temp.java Leak.java
+java -Xmx32m Temp</code></pre>
+<div class="expect"><pre><code>Đã tạo 100 000 object (~1 000 MB). Xong, không lỗi!</code></pre></div>
+<p>Không sập. Vì sao? Bật nhật ký GC lên để xem người dọn dẹp làm việc:</p>
+<pre><code>java -Xmx32m -Xlog:gc Temp</code></pre>
+<div class="expect"><pre><code>[0.002s][info][gc] Using G1
+[0.024s][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) <span class="hl">17M->1M</span>(32M) 0.460ms
+[0.026s][info][gc] GC(1) Pause Young (Normal) (G1 Evacuation Pause) <span class="hl">19M->1M</span>(32M) 0.229ms
+... (khoảng 50 dòng tương tự)</code></pre></div>
+
+<h3>Đọc một dòng GC log</h3>
+<p>Lấy dòng <code>GC(1) Pause Young ... 19M->1M(32M) 0.229ms</code> ra đọc từng phần:</p>
+<table>
+  <tr><th>Phần</th><th>Nghĩa</th></tr>
+  <tr><td><code>Using G1</code></td><td>JVM đang dùng trình dọn rác tên <strong>G1</strong>, loại mặc định của Java 21.</td></tr>
+  <tr><td><code>GC(1)</code></td><td>Lần dọn thứ 2 (đếm từ 0).</td></tr>
+  <tr><td><code>Pause</code></td><td>Trong lúc dọn, chương trình phải <strong>tạm dừng</strong>.</td></tr>
+  <tr><td><code>19M->1M</code></td><td><strong>Trước khi dọn</strong> heap dùng 19 MB, <strong>sau khi dọn</strong> chỉ còn 1 MB. Tức là 18 MB rác đã được gom đi.</td></tr>
+  <tr><td><code>(32M)</code></td><td>Tổng dung lượng heap.</td></tr>
+  <tr><td><code>0.229ms</code></td><td>Lần dọn này làm chương trình dừng 0,229 mili giây.</td></tr>
+</table>
+<p>Cứ heap đầy lên khoảng 19 MB thì GC dọn một lần, xuống lại còn 1 MB. Khoảng 50 lần như vậy là đủ gom hết 1 000 MB rác. Chương trình không bao giờ bị thiếu chỗ.</p>
+
+<h2>4 · Thí nghiệm 2: memory leak</h2>
+<p>Mở <code>Leak.java</code>. Khác biệt duy nhất: mỗi mảng mới được <strong>bỏ vào một List static</strong> và không bao giờ bị xoá ra.</p>
+<pre><code>static List&lt;byte[]&gt; cache = new ArrayList&lt;&gt;();   // static: sống suốt chương trình
+...
+cache.add(new byte[10_000]);                      // ~10 KB, bỏ vào cache, không bao giờ xoá</code></pre>
+<p>Theo câu chuyện bóng bay: <code>cache</code> là biến <code>static</code>, tức là một bàn tay <strong>cầm dây suốt đời chương trình</strong>. Mọi mảng trong List đều buộc vào nó, nên không quả bóng nào bị coi là rác. <strong>Đoán trước:</strong> chuyện gì xảy ra?</p>
+<pre><code>java -Xmx32m Leak</code></pre>
+<div class="expect"><pre><code>Đang giữ khoảng 10 MB
+Đang giữ khoảng 20 MB
+Đang giữ khoảng 30 MB
+Sập sau 3199 object: java.lang.OutOfMemoryError: Java heap space</code></pre></div>
+<p>Chương trình chỉ cần khoảng 32 MB, ít hơn thí nghiệm 1 tới 30 lần, vậy mà lại <strong>sập</strong>. Xem nhật ký GC ngay trước lúc sập:</p>
+<pre><code>java -Xmx32m -Xlog:gc Leak | grep Pause | tail -4</code></pre>
+<div class="expect"><pre><code>GC(14) Pause Full (G1 Compaction Pause) <span class="bad-hl">31M->31M</span>(32M) 1.082ms
+GC(15) Pause Full (G1 Compaction Pause) <span class="bad-hl">31M->31M</span>(32M) 3.193ms
+GC(16) Pause Young (Concurrent Start) ... 31M->31M(32M) 0.150ms
+GC(17) Pause Full (G1 Compaction Pause) 31M->1M(8M) 1.467ms</code></pre></div>
+<ul>
+  <li><code>Pause Full</code> nghĩa là GC đã dọn <strong>toàn bộ</strong> heap, lần dọn kỹ nhất và tốn thời gian nhất.</li>
+  <li><code>31M->31M</code> nghĩa là dọn xong mà <strong>không giảm được byte nào</strong>, vì mọi object vẫn đang bị <code>cache</code> giữ.</li>
+  <li>Không còn chỗ cho object mới, nên JVM ném <code>OutOfMemoryError: Java heap space</code>.</li>
+  <li>Dòng cuối <code>31M->1M</code>: sau khi code bắt lỗi và gán <code>cache = null</code> (buông dây), GC dọn được ngay lập tức.</li>
+</ul>
+
+<div class="remember">
+<strong>Memory leak trong Java</strong> không phải là "GC quên dọn". Nó là việc bạn <strong>vô tình vẫn giữ tham chiếu</strong> tới object không còn dùng nữa, thường gặp nhất là trong một <code>List</code>/<code>Map</code> <code>static</code> chỉ thêm vào mà không bao giờ xoá ra.<br>
+Dấu hiệu trong GC log: <strong>sau mỗi lần dọn, con số "sau" cứ tăng dần</strong>, cho tới khi trước bằng sau (<code>31M->31M</code>).
+</div>
+
+<h2>5 · Khi gặp chuyện này ở production</h2>
+<p>Ứng dụng chạy vài ngày thì chậm dần, rồi sập với <code>OutOfMemoryError: Java heap space</code>. Có hai việc nên làm ngay:</p>
+<ol class="flow">
+  <li><strong>Bật GC log</strong> (<code>-Xlog:gc</code>) để xem con số "sau khi dọn" có tăng dần theo thời gian không. Tăng dần là dấu hiệu leak.</li>
+  <li><strong>Bật heap dump tự động</strong>: thêm <code>-XX:+HeapDumpOnOutOfMemoryError</code>. Khi sập, JVM tự <em>chụp ảnh toàn bộ heap</em> ra một file <code>.hprof</code>. Mở file đó bằng công cụ phân tích (ví dụ Eclipse MAT, VisualVM) sẽ thấy object nào đang chiếm nhiều bộ nhớ nhất và ai đang giữ nó.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/troubleshoot/troubleshooting-memory-leaks.html">[Oracle: Troubleshooting Memory Leaks]</a></li>
+</ol>
+<p>Thử ngay trên máy bạn:</p>
+<pre><code>java -Xmx32m -XX:+HeapDumpOnOutOfMemoryError Leak</code></pre>
+<div class="expect"><pre><code>Dumping heap to java_pid386375.hprof ...
+Heap dump file created [35671755 bytes in 0.017 secs]
+Sập sau 3199 object: java.lang.OutOfMemoryError: Java heap space</code></pre>
+<p style="margin:0">(Số pid sẽ khác trên máy bạn. Nhớ xoá file <code>.hprof</code> sau khi xem xong, vì nó khá nặng.)</p></div>
+
+<div class="callout"><strong>Câu phỏng vấn: "Java có GC rồi, sao vẫn bị memory leak?"</strong>
+<p><em>"GC chỉ dọn những object không còn đi tới được từ GC root (biến của các method đang chạy, biến static...). Nếu code vẫn giữ tham chiếu tới object không dùng nữa, ví dụ một Map static làm cache mà chỉ thêm không xoá, thì GC coi object đó vẫn đang được dùng và không dọn. Bộ nhớ tăng dần cho tới khi gặp <code>OutOfMemoryError</code>. Để điều tra, tôi bật GC log xem bộ nhớ sau mỗi lần dọn có tăng dần không, và bật <code>HeapDumpOnOutOfMemoryError</code> để phân tích xem ai đang giữ object."</em></p></div>
+
+<h2>6 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q7"></div>
+<script type="application/json" id="q7">[
+ {"q":"Khi nào một object trở thành rác mà GC được phép dọn?",
+  "options":["Khi chương trình không gọi tới nó một lúc","Khi không còn đi tới được từ GC root nào","Khi object đó đã tồn tại quá một phút","Khi lập trình viên gọi hàm xoá object"],
+  "answer":1,"why":"GC chỉ xét object còn đi tới được từ GC root (biến của các method đang chạy, biến static...) hay không. Thời gian tồn tại hay việc \"không dùng tới\" đều không quan trọng."},
+ {"q":"Dòng GC log <code>Pause Young ... 19M->1M(32M)</code> nghĩa là gì?",
+  "options":["Heap tăng từ 1 MB lên 19 MB sau khi dọn","Có 19 object bị xoá, còn lại đúng 1 object","Chương trình dừng hẳn trong suốt 19 giây","Trước dọn dùng 19 MB, sau dọn còn 1 MB"],
+  "answer":3,"why":"Số bên trái mũi tên là dung lượng heap đang dùng trước khi dọn, số bên phải là sau khi dọn, trong ngoặc là tổng dung lượng heap."},
+ {"q":"GC log liên tục có dòng <code>Pause Full ... 31M->31M(32M)</code>. Đây là dấu hiệu của điều gì?",
+  "options":["Object vẫn bị giữ, nghi ngờ memory leak","GC chạy rất tốt, heap đang được tối ưu","JIT vừa biên dịch xong toàn bộ code nóng","Chương trình chưa tạo ra object mới nào"],
+  "answer":0,"why":"Dọn toàn bộ heap mà không giảm được byte nào, nghĩa là mọi object vẫn đang bị giữ. Ngay sau đó thường là <code>OutOfMemoryError</code>."},
+ {"q":"Cách sửa nào thực sự xử lý được leak trong <code>Leak.java</code>?",
+  "options":["Tăng -Xmx lên thật lớn là sẽ hết lỗi","Gọi System.gc() sau mỗi lần thêm phần tử","Xoá bớt phần tử cũ để cache không phình","Đổi ArrayList thành LinkedList cho nhẹ"],
+  "answer":2,"why":"Gốc rễ là <code>cache</code> giữ mãi mọi object. Tăng <code>-Xmx</code> chỉ làm chậm thời điểm sập. <code>System.gc()</code> cũng vô ích, vì object vẫn bị giữ. Phải buông tham chiếu ra (giới hạn kích thước, xoá phần tử cũ)."},
+ {"q":"(Ôn bài 8) Vì sao đo thời gian một hàm bằng đúng <strong>một lần</strong> gọi thường cho kết quả sai?",
+  "options":["Vì lần đầu GC luôn dọn rác rất lâu","Vì lần đầu code còn chạy thông dịch","Vì lần đầu chưa nạp đủ thư viện chuẩn","Vì lần đầu CPU chạy ở xung nhịp thấp"],
+  "answer":1,"why":"Lúc đầu JVM thông dịch. Code chỉ được JIT biên dịch sang mã máy sau khi chạy nhiều lần (warm-up), nên lần đầu chậm hơn thực tế tới hơn 10 lần."}
+]</script>
+
+<h2>7 · Thử thách: sửa leak</h2>
+<div class="lab">
+<p><strong>Nhiệm vụ:</strong> sửa <code>Leak.java</code> để cache giữ <strong>tối đa 1 000 phần tử</strong> (khoảng 10 MB). Khi đầy thì bỏ phần tử cũ nhất trước khi thêm phần tử mới. Cho vòng lặp chạy 50 000 lần (thay vì chạy mãi), và chương trình phải kết thúc <strong>không lỗi</strong> với <code>-Xmx32m</code>.</p>
+<p>Gợi ý:</p>
+<ol>
+  <li>Thêm hằng số <code>static final int MAX = 1000;</code></li>
+  <li>Trước khi <code>cache.add(...)</code>, kiểm tra nếu <code>cache.size() &gt;= MAX</code> thì <code>cache.remove(0)</code>. Phần tử bị bỏ ra không còn ai giữ, nên nó thành rác.</li>
+  <li>Chạy <code>java -Xmx32m -Xlog:gc Leak</code> và để ý: con số "sau khi dọn" giờ có còn tăng mãi không?</li>
+</ol>
+<details><summary>Xem lời giải</summary>
+<pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Leak {
+    static List&lt;byte[]&gt; cache = new ArrayList&lt;&gt;();
+    static final int MAX = 1000;                      // giữ tối đa 1000 object (~10 MB)
+
+    public static void main(String[] args) {
+        for (int i = 1; i &lt;= 50_000; i++) {
+            if (cache.size() &gt;= MAX) cache.remove(0);  // bỏ cái cũ nhất → nó thành rác
+            cache.add(new byte[10_000]);
+        }
+        System.out.println("Xong 50 000 object, cache đang giữ " + cache.size() + " cái. Không lỗi!");
+    }
+}</code></pre>
+<div class="expect"><pre><code>Xong 50 000 object, cache đang giữ 1000 cái. Không lỗi!</code></pre></div>
+<p>Trong GC log, con số "sau khi dọn" giờ dừng ở khoảng 10 MB, đúng bằng phần cache đang giữ, thay vì tăng mãi cho tới lúc sập. Ngoài đời, bạn sẽ không tự viết cache như thế này, mà dùng thư viện có sẵn giới hạn kích thước (ví dụ Caffeine). Nhưng nguyên tắc vẫn y hệt: <strong>cache nào cũng phải có giới hạn</strong>.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: vì sao có "Young" và "Full"?</summary>
+<p>Người ta quan sát thấy <strong>đa số object chết rất trẻ</strong>: tạo ra, dùng trong một method, rồi bỏ đi ngay (giống mảng <code>last</code> ở thí nghiệm 1). Vì vậy G1 chia heap thành hai khu:<a class="cite" href="https://docs.oracle.com/en/java/javase/21/gctuning/garbage-first-g1-garbage-collector1.html">[Oracle: G1 GC]</a></p>
+<ul>
+  <li><strong>Young generation</strong> (khu trẻ): nơi object mới được tạo ra. Khu này được dọn thường xuyên và rất nhanh (<code>Pause Young</code>, dưới 1 ms trong thí nghiệm của ta), vì hầu hết object ở đây đã là rác.</li>
+  <li><strong>Old generation</strong> (khu già): object sống sót qua vài lần dọn sẽ được chuyển sang đây. Khu này ít khi được dọn hơn.</li>
+</ul>
+<p><code>Pause Full</code> là khi GC phải dọn <strong>toàn bộ</strong> heap, gồm cả khu già. Đây là lần dọn chậm nhất. Thấy <code>Pause Full</code> xuất hiện thường xuyên trong log production là dấu hiệu heap đang quá tải (leak, hoặc <code>-Xmx</code> quá nhỏ so với nhu cầu thật).</p>
+<p>Trong <code>Leak.java</code>, ở cuối bài thí nghiệm bạn cũng sẽ thấy <code>(G1 Compaction Pause)</code>: GC dồn các object còn sống lại sát nhau để tạo ra chỗ trống liền mạch. Chi tiết về tuning G1 sẽ để dành cho một bài sau.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/en/java/javase/21/gctuning/">Oracle JDK 21: HotSpot Virtual Machine Garbage Collection Tuning Guide</a>. Tài liệu chính thức về GC. Đọc trước hai chương đầu (Introduction và Garbage Collector Implementation). Khi cần điều tra leak thật thì xem <a href="https://docs.oracle.com/en/java/javase/21/troubleshoot/troubleshooting-memory-leaks.html">Troubleshooting Memory Leaks</a>.</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "biến trong method đã chạy xong còn là GC root không?", "System.gc() có nên dùng không?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0008-jit-warm-up.html">← Bài 8: JIT và warm-up</a><a href="0010-arraylist-ben-trong.html">Bài 10: ArrayList bên trong →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

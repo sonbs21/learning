@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JIT và warm-up</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Vì sao Java chạy càng lâu càng nhanh?</h1>
+<p class="subtitle">Bài 8 · Interpreter, JIT, và hiện tượng "khởi động máy" (warm-up) mà bạn sẽ gặp ở production</p>
+<div class="meta"><span>~30 phút</span><span>Cần biết: <a href="0001-tu-source-den-bytecode.html">Bài 1</a> (JVM thông dịch + JIT)</span><span>Thư mục thực hành: <code>lab/l0008</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Tự đo được: cùng một hàm, lần gọi đầu chậm hơn lần gọi thứ 1000 tới hơn 10 lần.</li>
+  <li>Giải thích được nguyên nhân bằng interpreter và JIT.</li>
+  <li>Biết vì sao request đầu tiên sau mỗi lần deploy hay bị chậm, và vì sao đo hiệu năng bằng một lần chạy là sai.</li>
+</ul>
+
+<h2>1 · Ôn bài 1 (trả lời trong đầu trước)</h2>
+<div class="callout">Ở bài 1, JVM có hai cách chạy bytecode. Đó là hai cách nào? Phiên dịch viên trong câu chuyện làm gì với "câu được hỏi rất nhiều lần"?
+<details><summary>Kiểm tra</summary>
+<p><strong>Thông dịch</strong> (interpreter): dịch miệng từng lệnh, khởi động nhanh nhưng chạy chậm. <strong>JIT</strong>: đoạn code nào chạy nhiều thì dịch hẳn sang mã máy một lần, giống phiên dịch viên viết sẵn bản dịch ra giấy. Bài hôm nay sẽ <em>đo</em> sự khác biệt đó bằng con số thật.</p></details></div>
+
+<h2>2 · Câu chuyện: nhân viên mới</h2>
+
+<div class="analogy">
+<p>Một nhân viên mới vào làm, ngày nào cũng phải điền cùng một loại biểu mẫu.</p>
+<ul>
+  <li><strong>Mấy lần đầu:</strong> mỗi ô lại phải mở sách hướng dẫn ra đọc. Chậm, nhưng bắt tay vào làm được ngay.</li>
+  <li><strong>Sau vài chục lần:</strong> anh ta nhận ra "biểu mẫu này mình làm hoài", nên ghi ra một <strong>tờ ghi chú tóm tắt</strong>. Từ đó làm nhanh hơn hẳn.</li>
+  <li><strong>Sau vài nghìn lần:</strong> anh ta dành hẳn một buổi để viết một <strong>bản hướng dẫn thật kỹ</strong>, tối ưu từng bước. Từ đó làm nhanh nhất có thể.</li>
+</ul>
+<p>Anh ta không viết ghi chú cho những việc chỉ làm một lần, vì viết ghi chú cũng tốn thời gian. Anh ta chỉ đầu tư cho những việc <strong>lặp đi lặp lại</strong>.</p>
+</div>
+
+<table>
+  <tr><th>Trong câu chuyện</th><th>Trong JVM</th></tr>
+  <tr><td>Mở sách hướng dẫn đọc từng ô</td><td><span class="term">Interpreter</span> (thông dịch): chạy từng lệnh bytecode</td></tr>
+  <tr><td>Tờ ghi chú tóm tắt</td><td><span class="term">C1</span>: JIT biên dịch nhanh, tối ưu vừa phải</td></tr>
+  <tr><td>Bản hướng dẫn thật kỹ</td><td><span class="term">C2</span>: JIT biên dịch lâu hơn, nhưng tối ưu rất mạnh</td></tr>
+  <tr><td>"Biểu mẫu này mình làm hoài"</td><td>JVM <strong>đếm</strong> số lần mỗi hàm được gọi và số vòng lặp đã chạy</td></tr>
+</table>
+<p>Cách làm theo nhiều tầng như vậy gọi là <span class="term">tiered compilation</span> (biên dịch phân tầng). Đây là chế độ mặc định của JVM.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/vm/java-hotspot-virtual-machine-performance-enhancements.html#GUID-85BA7DE7-4AF9-47D9-BFCF-379230C66412">[Oracle: Tiered Compilation]</a></p>
+
+<h2>3 · Tự đo: cùng một hàm, tốc độ khác nhau</h2>
+<p>Mở <code>Warmup.java</code>. Hàm <code>work()</code> chỉ làm một phép tính đơn giản 20 000 lần. Chương trình gọi nó <strong>3000 lần liên tiếp</strong>, đo thời gian từng lần, và in ra lần 1 đến 5 rồi cứ 500 lần in một lần:</p>
+<pre><code>static long work() {
+    long sum = 0;
+    for (int i = 0; i &lt; 20_000; i++) {
+        sum += i % 7 * 3 + (i ^ 5);
+    }
+    return sum;
+}</code></pre>
+<p><strong>Đoán trước:</strong> lần gọi thứ 1 và lần gọi thứ 3000 có mất thời gian bằng nhau không? (Đơn vị là µs, tức micro giây, một phần triệu giây.)</p>
+<pre><code>cd lab/l0008
+javac Warmup.java
+java Warmup</code></pre>
+<div class="expect"><pre><code>Lần gọi    1:   260 µs
+Lần gọi    2:   270 µs
+Lần gọi    3:   270 µs
+Lần gọi    4:   275 µs
+Lần gọi    5:    49 µs
+Lần gọi  500:    22 µs
+Lần gọi 1000:    22 µs
+...
+Lần gọi 3000:    22 µs</code></pre>
+<p style="margin:0">(Số trên máy bạn có thể khác một chút, nhưng xu hướng sẽ giống.)</p></div>
+<p>Cùng một hàm, cùng một việc, mà <strong>lần thứ 1000 nhanh hơn lần đầu khoảng 12 lần</strong>. Đọc từng giai đoạn:</p>
+<ol class="flow">
+  <li><strong>Lần 1–4 (~270 µs):</strong> JVM đang <em>thông dịch</em>, như nhân viên mới mở sách đọc từng ô.</li>
+  <li><strong>Lần 5 (~49 µs):</strong> JVM nhận ra <code>work()</code> chạy rất nhiều, nên đã biên dịch nó sang mã máy (tờ ghi chú).</li>
+  <li><strong>Từ đó trở đi (~22 µs):</strong> bản tối ưu kỹ (C2) đã sẵn sàng. Tốc độ ổn định ở mức nhanh nhất.</li>
+</ol>
+
+<h3>Thử tắt JIT đi</h3>
+<p>Cờ <code>-Xint</code> bảo JVM: "chỉ được thông dịch, không được dùng JIT". <strong>Đoán trước</strong> kết quả, rồi chạy:</p>
+<pre><code>java -Xint Warmup</code></pre>
+<div class="expect"><pre><code>Lần gọi    1:   220 µs
+Lần gọi    2:   210 µs
+...
+Lần gọi 1000:   204 µs
+...
+Lần gọi 3000:   209 µs</code></pre></div>
+<p>Không có JIT thì hàm <strong>mãi mãi chậm</strong> (~209 µs), vì nhân viên không bao giờ được phép viết ghi chú. Đây là bằng chứng: chính JIT làm Java nhanh lên. (<code>-Xint</code> chỉ dùng để thí nghiệm, không bao giờ dùng ở production.)</p>
+
+<div class="remember">Lúc mới khởi động, JVM chạy code ở chế độ thông dịch (chậm). Code nào chạy nhiều sẽ được JIT biên dịch sang mã máy (nhanh). Quá trình "chậm lúc đầu, nhanh dần lên" này gọi là <strong>warm-up</strong> (khởi động máy).</div>
+
+<h2>4 · Chuyện này ảnh hưởng gì khi đi làm?</h2>
+
+<h3>a. Request đầu tiên sau mỗi lần deploy bị chậm</h3>
+<p>Mỗi lần bạn deploy (hoặc restart) một ứng dụng Spring Boot, JVM bắt đầu lại từ con số 0, mọi "tờ ghi chú" cũ đều mất hết. Những request đầu tiên chạy ở chế độ thông dịch nên chậm hơn hẳn. Sau vài phút có traffic, code "nóng" được JIT biên dịch và hệ thống chạy nhanh trở lại.</p>
+<p>Vì vậy bạn sẽ thấy biểu đồ độ trễ (latency) <strong>tăng vọt một lúc ngay sau mỗi lần deploy</strong>. Đó không phải bug, mà là warm-up. Nhiều team xử lý bằng cách cho ứng dụng tự gọi thử các API quan trọng vài lần trước khi bắt đầu nhận traffic thật.</p>
+
+<h3>b. Đo hiệu năng một lần là đo sai</h3>
+<p>Mở <code>BadBenchmark.java</code>: nó gọi <code>work()</code> đúng <strong>một lần</strong> rồi in thời gian.</p>
+<pre><code>javac BadBenchmark.java
+java BadBenchmark</code></pre>
+<div class="expect"><pre><code>work() mất 268 µs  (kết quả 200169991)</code></pre></div>
+<p>Con số 268 µs này <strong>sai lệch hơn 10 lần</strong> so với tốc độ thật của hàm khi ứng dụng đã chạy ổn định (~22 µs). Nếu bạn dùng cách đo này để so Java với ngôn ngữ khác, hay so hai cách viết code với nhau, kết luận gần như chắc chắn sẽ sai.</p>
+
+<div class="callout"><strong>Câu phỏng vấn: "JIT là gì? Vì sao ứng dụng Java chạy một lúc thì nhanh hơn?"</strong>
+<p><em>"Lúc đầu JVM thông dịch bytecode. Nó đếm xem hàm và vòng lặp nào chạy nhiều. Code 'nóng' sẽ được JIT biên dịch sang mã máy, trước tiên bằng C1 (biên dịch nhanh), rồi bằng C2 (tối ưu mạnh). Vì vậy ứng dụng Java có giai đoạn warm-up: chậm lúc mới khởi động, nhanh dần khi code nóng lên. Hệ quả thực tế: latency tăng ngay sau deploy, và muốn đo hiệu năng thì phải cho JVM khởi động trước, tốt nhất là dùng JMH."</em></p></div>
+
+<h2>5 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q6"></div>
+<script type="application/json" id="q6">[
+ {"q":"Vì sao lần gọi <code>work()</code> thứ 1000 nhanh hơn lần gọi đầu tiên khoảng 12 lần?",
+  "options":["Vì CPU tự tăng tốc sau khi chạy nóng lên","Vì JIT đã dịch work() sang mã máy","Vì kết quả của work() đã được lưu sẵn","Vì GC đã dọn sạch bộ nhớ trước lần đó"],
+  "answer":1,"why":"Lúc đầu JVM thông dịch. Sau khi thấy <code>work()</code> được gọi nhiều, JIT biên dịch nó sang mã máy, nên từ đó chạy nhanh hơn hẳn. Tắt JIT bằng <code>-Xint</code> thì không còn hiện tượng này nữa."},
+ {"q":"Chạy với <code>-Xint</code> thì thời gian mỗi lần gọi <code>work()</code> thay đổi thế nào?",
+  "options":["Nhanh ngay từ lần đầu, vì đã bỏ bớt JIT","Chậm lúc đầu, rồi nhanh dần như bình thường","Luôn chậm như nhau, vì JIT đã bị tắt","Không chạy được, vì thiếu trình biên dịch"],
+  "answer":2,"why":"<code>-Xint</code> chỉ cho phép thông dịch. Không có JIT thì không có \"tờ ghi chú\", nên lần nào cũng chậm như lần đầu (~209 µs)."},
+ {"q":"Biểu đồ latency tăng vọt vài phút ngay sau khi deploy bản mới, rồi tự trở lại bình thường. Nguyên nhân hợp lý nhất là gì?",
+  "options":["JVM mới khởi động, code chưa được JIT","Database bị khoá cứng sau mỗi lần deploy","Code bản mới chắc chắn có bug nghiêm trọng","Mạng chậm do có quá nhiều người truy cập"],
+  "answer":0,"why":"Restart làm mất hết code đã JIT. Các request đầu chạy ở chế độ thông dịch (warm-up), nên chậm hơn rồi nhanh dần. Tất nhiên vẫn nên kiểm tra các nguyên nhân khác, nhưng warm-up là điều luôn xảy ra."},
+ {"q":"Bạn muốn so tốc độ hai cách viết một hàm. Cách đo nào đáng tin hơn?",
+  "options":["Gọi mỗi hàm đúng một lần rồi so thời gian","Chạy với -Xint để loại bỏ hẳn ảnh hưởng JIT","Đo lúc vừa deploy, khi máy còn đang rảnh","Gọi nhiều lần để khởi động, rồi mới đo"],
+  "answer":3,"why":"Phải cho JVM warm-up trước, nếu không bạn chỉ đang đo tốc độ thông dịch. Công cụ chuẩn để làm việc này là JMH. <code>-Xint</code> thì cho ra con số không giống production."},
+ {"q":"(Ôn bài 5) Khối <code>static { }</code> của một class chạy khi nào?",
+  "options":["Mỗi lần gọi một method static của nó","Lần đầu tiên class được dùng tới","Ngay khi chương trình vừa bắt đầu","Mỗi lần tạo object bằng từ khoá new"],
+  "answer":1,"why":"Khối static chạy đúng một lần, vào lần đầu tiên class được dùng (tạo object, gọi method static, đọc biến static không phải hằng số...)."}
+]</script>
+
+<h2>6 · Thử thách: sửa cách đo cho đúng</h2>
+<div class="lab">
+<p><code>BadBenchmark.java</code> đo <code>work()</code> đúng một lần nên ra ~268 µs. <strong>Nhiệm vụ của bạn:</strong> sửa hàm <code>main</code> để đo được tốc độ <em>thật</em> của <code>work()</code> khi JVM đã khởi động xong. Mục tiêu: ra con số khoảng 20–30 µs.</p>
+<p>Gợi ý, làm theo từng bước:</p>
+<ol>
+  <li>Trước khi đo, gọi <code>work()</code> thật nhiều lần (ví dụ 5 000 lần) mà <strong>không đo</strong>, để JIT kịp làm việc.</li>
+  <li>Sau đó mới bắt đầu bấm giờ, gọi <code>work()</code> nhiều lần (ví dụ 1 000 lần), rồi chia tổng thời gian cho số lần để lấy trung bình.</li>
+  <li>Cộng dồn kết quả của <code>work()</code> vào một biến và in biến đó ra cuối chương trình. (Lý do: nếu kết quả không được dùng ở đâu cả, JIT có thể nhận ra và bỏ qua luôn phép tính, khiến con số đo được nhỏ một cách vô lý.)</li>
+</ol>
+<details><summary>Xem lời giải</summary>
+<pre><code>public static void main(String[] args) {
+    long keep = 0;
+    for (int i = 0; i &lt; 5_000; i++) keep += work();   // 1. khởi động cho JIT
+
+    int times = 1_000;
+    long start = System.nanoTime();                     // 2. bắt đầu đo
+    for (int i = 0; i &lt; times; i++) keep += work();
+    long us = (System.nanoTime() - start) / 1_000 / times;
+
+    System.out.println("work() mất trung bình " + us + " µs  (" + keep + ")");  // 3. dùng kết quả
+}</code></pre>
+<div class="expect"><pre><code>work() mất trung bình 22 µs  (1201019946000)</code></pre></div>
+<p>Đây là cách làm thủ công để bạn hiểu nguyên lý. Khi cần đo nghiêm túc, hãy dùng <a href="https://github.com/openjdk/jmh">JMH</a>, công cụ đo hiệu năng chính thức do chính đội OpenJDK viết. JMH tự lo warm-up, chống JIT bỏ qua phép tính, và chạy nhiều lượt để lấy số liệu đáng tin.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: nhìn tận mắt JIT làm việc</summary>
+<p>Cờ <code>-XX:+PrintCompilation</code> bảo JVM in ra mỗi lần nó JIT một hàm. Lọc riêng hàm <code>work</code>:</p>
+<pre><code>java -XX:+PrintCompilation Warmup | grep 'Warmup::work'</code></pre>
+<pre><code>37  138 %     <span class="hl">3</span>       Warmup::work @ 4 (33 bytes)
+37  140       <span class="hl">3</span>       Warmup::work (33 bytes)
+39  142 %     <span class="hl">4</span>       Warmup::work @ 4 (33 bytes)
+39  138 %     3       Warmup::work @ 4 (33 bytes)   made not entrant
+40  143       <span class="hl">4</span>       Warmup::work (33 bytes)
+43  140       3       Warmup::work (33 bytes)   made not entrant</code></pre>
+<ul>
+  <li><strong>Cột đầu</strong> (37, 39...): thời điểm, tính bằng mili giây kể từ lúc JVM khởi động.</li>
+  <li><strong>Số 3 / 4</strong>: tầng biên dịch. 3 là C1 (tờ ghi chú), 4 là C2 (bản hướng dẫn kỹ).</li>
+  <li><strong>Dấu %</strong>: JIT biên dịch <em>ngay giữa vòng lặp</em> đang chạy, không cần chờ hàm được gọi lại. Kỹ thuật này gọi là OSR (On-Stack Replacement).</li>
+  <li><strong>made not entrant</strong>: bản cũ (tầng 3) bị bỏ, vì đã có bản tốt hơn (tầng 4).</li>
+</ul>
+<p>Muốn biết JVM cần đếm tới bao nhiêu thì mới JIT, xem các ngưỡng mặc định:</p>
+<pre><code>java -XX:+PrintFlagsFinal -version | grep -E ' Tier(3|4)InvocationThreshold '</code></pre>
+<pre><code>intx Tier3InvocationThreshold = 200
+intx Tier4InvocationThreshold = 5000</code></pre>
+<p>Ngoài số lần gọi hàm, JVM còn đếm cả số vòng lặp đã chạy. Đó là lý do <code>work()</code> (có vòng lặp 20 000 lần) được biên dịch chỉ sau vài lần gọi, chứ không cần đợi đủ 200 lần.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/en/java/javase/21/vm/java-hotspot-virtual-machine-performance-enhancements.html#GUID-85BA7DE7-4AF9-47D9-BFCF-379230C66412">Oracle JDK 21 VM Guide: Tiered Compilation</a>. Tài liệu chính thức, ngắn, mô tả đúng cơ chế trong bài. Muốn đi xa hơn thì đọc chương JIT trong cuốn <em>Java Performance</em> (Scott Oaks) đã có trong <code>RESOURCES.md</code>.</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Nhớ gửi kết quả quiz, và lời giải thử thách nếu bạn tự viết được, để mình nhận xét và chỉnh bài sau cho vừa sức bạn.</p>
+
+<div class="footer-nav"><a href="0007-overriding-overloading.html">← Bài 7: Overloading và Overriding</a><a href="0009-gc-don-rac.html">Bài 9: GC dọn rác →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

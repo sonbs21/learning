@@ -9,13 +9,14 @@
 <body>
 
 <h1>Vì sao <code>"hi" == "hi"</code> lại đúng, còn <code>new String("hi")</code> thì không?</h1>
-<p class="subtitle">Bài 4 · String pool, tính bất biến (immutable), và một bug rất hay gặp khi đi làm</p>
+<p class="subtitle">Bài 4 · String pool, tính bất biến (immutable), StringBuilder/StringBuffer, và một bug rất hay gặp khi đi làm</p>
 <div class="meta"><span>~30 phút</span><span>Cần biết: <a href="0001-tu-source-den-bytecode.html">Bài 1</a> (javac, chạy chương trình)</span><span>Thư mục thực hành: <code>lab/l0004</code></span></div>
 
 <p><strong>Học xong bài này, bạn sẽ:</strong></p>
 <ul>
   <li>Giải thích được vì sao <code>==</code> với String lúc ra <code>true</code>, lúc ra <code>false</code>.</li>
   <li>Hiểu <span class="term">String pool</span> là gì và vì sao String <strong>không sửa được</strong>.</li>
+  <li>Biết khi nào dùng <code>StringBuilder</code>, khi nào dùng <code>StringBuffer</code>, và vì sao cộng chuỗi trong vòng lặp lại chậm.</li>
   <li>Không bao giờ mắc bug so sánh String bằng <code>==</code> nữa.</li>
 </ul>
 
@@ -125,7 +126,82 @@ java Immutable</code></pre>
 </ul>
 </div>
 
-<h2>6 · Bug thật khi đi làm: so sánh String bằng <code>==</code></h2>
+<h2>6 · StringBuilder và StringBuffer: tấm bảng trắng viết xoá được</h2>
+<p>String bị "ép plastic" thì an toàn, nhưng có một cái giá. Hãy xem chuyện gì xảy ra khi ghép chuỗi nhiều lần.</p>
+
+<h3>Vấn đề: cộng chuỗi trong vòng lặp</h3>
+<p>Mỗi lần viết <code>s += "x"</code>, vì tấm cũ không sửa được, Java phải <strong>làm một tấm mới</strong>, chép toàn bộ chữ cũ sang, rồi thêm "x" vào cuối. Tấm cũ bỏ đi thành rác.</p>
+<div class="analogy">
+<p>Giống như muốn thêm một chữ vào tấm bảng ép plastic, bạn phải mua tấm mới và <em>chép tay lại toàn bộ</em> nội dung cũ. Lần thứ 1 chép 1 chữ, lần thứ 2 chép 2 chữ,… lần thứ 100 000 chép 100 000 chữ. Tổng cộng khoảng 5 tỷ chữ phải chép.</p>
+<p><strong><code>StringBuilder</code> là một tấm bảng trắng</strong>: viết thêm, xoá, sửa ngay trên chính tấm đó. Viết xong mới "chụp ảnh" lại thành một String bằng <code>toString()</code>.</p>
+</div>
+<p>Đo thật với <code>Concat.java</code>, ghép 100 000 chữ "x" bằng hai cách:</p>
+<pre><code>String s = "";
+for (int i = 0; i &lt; N; i++) s += "x";           // mỗi vòng: tạo String MỚI, chép lại toàn bộ
+
+StringBuilder sb = new StringBuilder();
+for (int i = 0; i &lt; N; i++) sb.append("x");     // viết thêm vào cùng một object
+String s2 = sb.toString();</code></pre>
+<pre><code>javac Concat.java
+java Concat</code></pre>
+<div class="expect"><pre><code>String +=      : <span class="hl">998 ms</span>, dài 100000
+StringBuilder  : <span class="hl">2 ms</span>, dài 100000</code></pre></div>
+<p>Chậm hơn khoảng <strong>500 lần</strong>, và càng nhiều vòng thì khoảng cách càng lớn, vì cách thứ nhất tốn công tăng theo <em>bình phương</em> số vòng. (Con số trên máy bạn sẽ khác, nhưng chênh lệch vẫn rất lớn.) Ngoài đời, lỗi này hay gặp khi ghép câu SQL, CSV hay HTML trong vòng lặp.</p>
+
+<h3>StringBuilder bên trong: một mảng tự nới rộng</h3>
+<p><code>StringBuilder</code> giữ chữ trong một mảng có chỗ trống dư. Còn chỗ thì viết thêm vào; hết chỗ thì tạo mảng lớn hơn và chép sang. Cách làm này bạn sẽ gặp lại ở <code>ArrayList</code> (bài 10). Method <code>capacity()</code> cho xem "sức chứa" hiện tại. <code>Capacity.java</code> thêm từng chữ và in ra mỗi lần mảng được nới:</p>
+<pre><code>javac Capacity.java
+java Capacity</code></pre>
+<div class="expect"><pre><code>Ban đầu: dài 0, sức chứa 16
+Đầy ở độ dài 16 → sức chứa mới 34
+Đầy ở độ dài 34 → sức chứa mới 70
+Đầy ở độ dài 70 → sức chứa mới 142
+append luôn trả về chính sb: true</code></pre></div>
+<ul>
+  <li>Sức chứa ban đầu là 16. Mỗi lần đầy, nó nới thành <strong>gấp đôi cộng 2</strong> (16 → 34 → 70 → 142). Vì nới gấp đôi, số lần phải chép rất ít, nên thêm chữ gần như luôn nhanh.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/StringBuilder.html#%3Cinit%3E()">[StringBuilder()]</a></li>
+  <li><code>append</code> sửa trên <strong>chính object đó</strong> rồi trả về chính nó (<code>sb.append("!") == sb</code> là <code>true</code>). Nhờ vậy viết nối được: <code>sb.append("a").append(1).append('!')</code>.</li>
+  <li>Biết trước độ dài lớn thì có thể cho sẵn sức chứa: <code>new StringBuilder(10_000)</code>, để khỏi phải nới nhiều lần.</li>
+</ul>
+
+<h3>StringBuffer: cùng một tấm bảng, nhưng có ổ khoá</h3>
+<p><code>StringBuffer</code> có <strong>gần như y hệt các method</strong> của <code>StringBuilder</code>. Khác biệt duy nhất: mọi method của nó đều có chữ <code>synchronized</code>, tức là mỗi lúc chỉ một thread được viết (bạn sẽ học <code>synchronized</code> kỹ ở bài 12). Xem bằng <code>javap</code> (bài 1):</p>
+<pre><code>javap java.lang.StringBuffer  | grep 'append(java.lang.String)'
+javap java.lang.StringBuilder | grep 'append(java.lang.String)'</code></pre>
+<div class="expect"><pre><code>  public <span class="hl">synchronized</span> java.lang.StringBuffer append(java.lang.String);
+  public java.lang.StringBuilder append(java.lang.String);</code></pre></div>
+<p>Khoá đó có tác dụng thế nào? <code>BuilderRace.java</code> cho <strong>hai thread</strong> cùng viết 100 000 chữ vào <em>một</em> tấm bảng, lần lượt với hai loại:</p>
+<pre><code>javac BuilderRace.java
+java BuilderRace</code></pre>
+<div class="expect"><pre><code>  StringBuilder lỗi: <span class="hl">java.lang.ArrayIndexOutOfBoundsException</span>: Index 286 out of bounds for length 286
+StringBuilder: dài <span class="hl">100238</span> (đúng phải là 200000)
+StringBuffer : dài 200000 (đúng phải là 200000)</code></pre></div>
+<p><code>StringBuilder</code> dùng chung giữa hai thread thì <strong>mất chữ</strong>, thậm chí <strong>ném lỗi</strong>: hai thread cùng thấy "còn chỗ" rồi cùng viết vào một ô, hoặc một thread viết vào đúng lúc thread kia đang nới mảng. Mỗi lần chạy ra số khác nhau. <code>StringBuffer</code> thì luôn đúng, vì có khoá.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/StringBuffer.html">[StringBuffer Javadoc]</a></p>
+
+<p><strong>Vậy dùng cái nào?</strong> Gần như luôn là <code>StringBuilder</code>. <code>StringBuffer</code> có từ Java 1.0. <code>StringBuilder</code> ra đời ở Java 5 chính là để bỏ cái khoá đi, vì trong thực tế một tấm bảng gần như luôn chỉ do <em>một</em> thread viết (biến cục bộ trong method). Tài liệu chính thức khuyên: <em>"it is recommended that this class be used in preference to StringBuffer as it will be faster under most implementations"</em>.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/StringBuilder.html">[StringBuilder Javadoc]</a></p>
+
+<table>
+<tr><th></th><th><code>String</code></th><th><code>StringBuilder</code></th><th><code>StringBuffer</code></th></tr>
+<tr><td>Sửa được không</td><td>Không (immutable)</td><td>Có</td><td>Có</td></tr>
+<tr><td>Dùng chung giữa nhiều thread</td><td>An toàn (không ai sửa được)</td><td><strong>Không an toàn</strong></td><td>An toàn (có <code>synchronized</code>)</td></tr>
+<tr><td>Tốc độ khi ghép nhiều lần</td><td>Chậm (mỗi lần tạo object mới)</td><td>Nhanh nhất</td><td>Nhanh, nhưng tốn thêm công khoá</td></tr>
+<tr><td>Khi nào dùng</td><td>Giá trị cố định, làm key, truyền đi</td><td><strong>Ghép chuỗi trong vòng lặp</strong> (mặc định)</td><td>Hiếm khi; chủ yếu gặp trong code cũ</td></tr>
+</table>
+
+<h3>Vậy có cần bỏ hẳn dấu <code>+</code> không?</h3>
+<p>Không. Ghép <strong>trên một dòng</strong> như <code>"Xin chào " + ten + "!"</code> thì cứ dùng <code>+</code>: compiler đã tự lo phần tối ưu. Từ Java 9, <code>javac</code> biên dịch phép <code>+</code> thành lệnh <code>invokedynamic</code> gọi một cơ chế ghép chuỗi được JVM tối ưu sẵn.<a class="cite" href="https://openjdk.org/jeps/280">[JEP 280]</a> Thử xem bytecode của dòng <code>s += "x"</code>:</p>
+<pre><code>javap -c Concat | grep invokedynamic</code></pre>
+<div class="expect"><pre><code>18: invokedynamic #18,  0   // InvokeDynamic #0:<span class="hl">makeConcatWithConstants</span>:(Ljava/lang/String;)Ljava/lang/String;</code></pre></div>
+<p>Phép ghép một lần thì nhanh. Vấn đề chỉ nằm ở chỗ nó chạy <strong>lại từ đầu ở mỗi vòng lặp</strong>, mỗi lần trả về một String mới dài hơn. Compiler không gộp các vòng lặp lại giúp bạn.</p>
+
+<div class="remember">
+<ul style="margin:0">
+  <li>Ghép chuỗi <strong>trong vòng lặp</strong> → dùng <code>StringBuilder</code>, cuối cùng gọi <code>toString()</code>.</li>
+  <li>Ghép trên một dòng → cứ dùng <code>+</code>.</li>
+  <li><code>StringBuffer</code> = <code>StringBuilder</code> + <code>synchronized</code>. An toàn khi nhiều thread cùng viết nhưng chậm hơn; trong thực tế hiếm khi cần.</li>
+</ul>
+</div>
+
+<h2>7 · Bug thật khi đi làm: so sánh String bằng <code>==</code></h2>
 <p>Đây là lý do quan trọng nhất của bài này. Xem <code>Login.java</code>:</p>
 <pre><code>String role = args[0];      // chữ do người dùng gõ vào lúc chạy
 System.out.println("role == \"admin\"      : " + (role == "admin"));
@@ -143,7 +219,7 @@ role.equals("admin") : true</code></pre></div>
 <div class="callout"><strong>Câu phỏng vấn: "String pool là gì? Vì sao String là immutable?"</strong>
 <p><em>"String pool là vùng nhớ nơi Java lưu các string literal. Các literal giống nhau dùng chung một object để tiết kiệm bộ nhớ. Vì nhiều biến có thể cùng chỉ tới một object, String phải là immutable: nếu sửa được thì sửa ở một chỗ sẽ làm hỏng mọi chỗ khác đang dùng chung. Đó cũng là lý do phải so sánh String bằng <code>equals</code>, vì <code>==</code> chỉ so xem có cùng object hay không."</em></p></div>
 
-<h2>7 · Tự kiểm tra</h2>
+<h2>8 · Tự kiểm tra</h2>
 <p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
 <div class="quiz" data-quiz="q4"></div>
 <script type="application/json" id="q4">[
@@ -159,12 +235,15 @@ role.equals("admin") : true</code></pre></div>
  {"q":"Kiểm tra mật khẩu người dùng gửi lên với chuỗi trong code. Nên viết thế nào?",
   "options":["input == \"secret\" vì nhanh hơn","input.equals(\"secret\") để so nội dung","input.intern() == \"secret\" cho chắc","input.hashCode() == 123 cho gọn"],
   "answer":1,"why":"Dữ liệu từ bên ngoài không nằm trên kệ, nên <code>==</code> sẽ ra false dù gõ đúng. Luôn dùng <code>equals</code> để so nội dung."},
+ {"q":"Một method ghép 50 000 dòng thành một file CSV, chạy trong một thread duy nhất. Nên dùng gì?",
+  "options":["StringBuilder, vì sửa tại chỗ, không khoá","String với +=, vì compiler tự tối ưu","StringBuffer, vì có synchronized cho chắc","String.concat, vì không tạo object mới"],
+  "answer":0,"why":"Trong vòng lặp, <code>+=</code> tạo String mới mỗi vòng (chậm theo bình phương). <code>StringBuilder</code> viết thêm vào cùng một object. Chỉ một thread nên không cần cái khoá của <code>StringBuffer</code>. <code>concat</code> cũng tạo String mới mỗi lần."},
  {"q":"(Ôn bài 1) Lệnh nào biến file <code>Pool.java</code> thành file <code>Pool.class</code>?",
   "options":["java Pool.java chạy trực tiếp","javap -v Pool để xem bên trong","javac Pool.java để biên dịch","jvm Pool để khởi động máy ảo"],
   "answer":2,"why":"<code>javac</code> là trình biên dịch: nó dịch code bạn viết thành bytecode trong file <code>.class</code>. Sau đó <code>java Pool</code> mới chạy file đó."}
 ]</script>
 
-<h2>8 · Thử thách: đoán 4 dòng</h2>
+<h2>9 · Thử thách: đoán 4 dòng</h2>
 <div class="lab">
 <p>Mở <code>Challenge.java</code>. <strong>Đoán từng dòng là true hay false trước khi chạy.</strong> Gợi ý nằm ngay dưới mỗi dòng.</p>
 <pre><code>String a = "hi";
@@ -206,7 +285,7 @@ java Challenge</code></pre>
 
 <p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Bạn cũng có thể gửi kết quả quiz và đáp án đoán của thử thách (đoán đúng mấy dòng?) để bài sau được chỉnh cho vừa sức bạn.</p>
 
-<div class="footer-nav"><a href="0003-equals-hashcode.html">← Bài 3</a><a href="0005-static-chay-khi-nao.html">Bài 5: Static chạy khi nào →</a></div>
+<div class="footer-nav"><a href="0003-equals-hashcode.html">← Bài 3: ==, equals, hashCode</a><a href="0005-static-chay-khi-nao.html">Bài 5: Static chạy khi nào →</a></div>
 
 <script src="../assets/quiz.js"></script>
 </body>

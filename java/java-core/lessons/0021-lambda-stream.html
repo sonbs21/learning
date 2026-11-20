@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lambda và Stream</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Lambda và Stream: chạy thế nào bên dưới</h1>
+<p class="subtitle">Bài 21 · Lambda thật ra là gì, vì sao nó không sinh ra file <code>.class</code>, vì sao Stream "lười", và những cái bẫy của <code>parallel()</code></p>
+<div class="meta"><span>~45 phút</span><span>Cần biết: <a href="0004-string-pool.html">Bài 4</a> (invokedynamic), <a href="0012-race-condition.html">Bài 12</a> (race condition), <a href="0015-thread-pool.html">Bài 15</a> (thread pool), <a href="0018-interface-abstract-access.html">Bài 18</a> (interface)</span><span>Thư mục thực hành: <code>lab/l0021</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Biết lambda dùng được ở đâu (functional interface), và đọc được 4 interface hay gặp nhất.</li>
+  <li>Chứng minh được lambda <em>không</em> phải class ẩn danh viết gọn, bằng <code>javap</code>.</li>
+  <li>Dự đoán đúng thứ tự chạy của một stream, và khi nào nó không chạy gì cả.</li>
+  <li>Tránh 3 bẫy của <code>parallel()</code>: ghi vào biến dùng chung, mất thứ tự, và tắc common pool.</li>
+</ul>
+
+<h2>1 · Ôn bài 4 và bài 15 (trả lời trong đầu trước)</h2>
+<div class="callout">
+<p>(a) Ở bài 4, <code>javap</code> cho thấy dòng <code>s += "x"</code> được biên dịch thành lệnh gì?</p>
+<p>(b) Một thread pool có 16 thread nhận 64 việc. Việc thứ 17 trở đi phải làm gì?</p>
+<details><summary>Kiểm tra</summary>(a) <code>invokedynamic</code> (<code>makeConcatWithConstants</code>): lệnh gọi mà "đích" được quyết định lúc chạy. Lambda cũng dùng đúng lệnh này. (b) Xếp hàng chờ có thread rảnh. Hôm nay bạn sẽ thấy parallel stream cũng chạy trên một pool như vậy, và pool đó dùng chung cho cả ứng dụng.</details></div>
+
+<h2>2 · Lambda: truyền một "việc cần làm" như truyền một giá trị</h2>
+<div class="analogy">
+<p>Bạn gửi đồ ở tiệm giặt và để lại một <strong>tờ ghi chú</strong>: "áo trắng giặt nước lạnh". Bạn không tự giặt; bạn đưa <em>cách làm</em> cho người khác, và họ làm khi tới lượt.</p>
+<p>Lambda chính là tờ ghi chú đó: một đoạn code nhỏ được đưa cho method khác dùng. <code>list.sort(...)</code> biết cách sắp xếp, nhưng cần bạn ghi chú "so sánh hai phần tử thế nào".</p>
+</div>
+<p><code>Lambda.java</code> so sánh cách cũ (class ẩn danh) và cách mới (lambda):</p>
+<pre><code>// Cách cũ: class ẩn danh
+mon.sort(new Comparator&lt;String&gt;() {
+    @Override public int compare(String a, String b) { return a.length() - b.length(); }
+});
+
+// Cách mới: lambda, cùng ý nghĩa
+mon.sort((a, b) -&gt; b.length() - a.length());</code></pre>
+<pre><code>cd lab/l0021
+javac Lambda.java
+java Lambda</code></pre>
+<div class="expect"><pre><code>Class ẩn danh: [cà phê, trà sữa, nước cam]
+Lambda:        [nước cam, trà sữa, cà phê]
+Giảm 10%: 45000
+true 6
+Xin chào</code></pre></div>
+<p>Cú pháp lambda: <code>(tham số) -&gt; kết quả</code>. Một tham số thì bỏ được ngoặc (<code>gia -&gt; gia * 90 / 100</code>). Compiler tự suy ra kiểu của <code>a</code>, <code>b</code> từ chỗ lambda được dùng.</p>
+
+<h3>Functional interface: "ổ cắm" cho lambda</h3>
+<p>Lambda không đứng một mình được. Nó luôn được gán vào một <strong>functional interface</strong>: một interface có <strong>đúng một method abstract</strong> (bài 18).<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-9.html#jls-9.8">[JLS §9.8]</a> Lambda chính là phần thân của method đó. <code>Comparator</code> có một method abstract là <code>compare</code>, nên <code>(a, b) -&gt; ...</code> được hiểu là cách cài <code>compare</code>.</p>
+<pre><code>@FunctionalInterface
+interface TinhGia { long tinh(long giaGoc); }      // đúng 1 method abstract
+
+TinhGia giam10 = gia -&gt; gia * 90 / 100;
+giam10.tinh(50_000)                                // 45000</code></pre>
+<p>Chú thích <code>@FunctionalInterface</code> giống <code>@Override</code> (bài 7): không bắt buộc, nhưng nhờ compiler kiểm tra giúp. Thêm method abstract thứ hai, <code>loi/HaiMethod.java</code>:</p>
+<pre><code>javac loi/HaiMethod.java</code></pre>
+<div class="expect"><pre><code>loi/HaiMethod.java:1: error: Unexpected @FunctionalInterface annotation
+  HaiViec is not a functional interface
+    <span class="hl">multiple non-overriding abstract methods found in interface HaiViec</span></code></pre></div>
+<p>Thường bạn không cần tự viết interface, vì gói <code>java.util.function</code> có sẵn.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/function/package-summary.html">[java.util.function]</a> Bốn cái hay gặp nhất:</p>
+<table>
+<tr><th>Interface</th><th>Nhận → trả</th><th>Ví dụ trong <code>Lambda.java</code></th><th>Dùng ở đâu</th></tr>
+<tr><td><code>Predicate&lt;T&gt;</code></td><td>T → boolean</td><td><code>s -&gt; s.contains("a")</code></td><td><code>filter</code></td></tr>
+<tr><td><code>Function&lt;T,R&gt;</code></td><td>T → R</td><td><code>String::length</code></td><td><code>map</code></td></tr>
+<tr><td><code>Supplier&lt;T&gt;</code></td><td>() → T</td><td><code>() -&gt; "Xin chào"</code></td><td><code>orElseGet</code>, tạo giá trị khi cần</td></tr>
+<tr><td><code>Consumer&lt;T&gt;</code></td><td>T → (không trả gì)</td><td><code>System.out::println</code></td><td><code>forEach</code></td></tr>
+</table>
+<p><code>String::length</code> là <strong>method reference</strong>: cách viết gọn của <code>s -&gt; s.length()</code> khi lambda chỉ gọi đúng một method có sẵn.</p>
+<p>Nhắc lại bài 16: lambda chỉ dùng được biến cục bộ <code>final</code> hoặc <em>effectively final</em> (không bị gán lại).</p>
+
+<div class="remember"><strong>Lambda</strong> = cài đặt ngắn gọn cho method duy nhất của một <strong>functional interface</strong>. Không có functional interface ở chỗ nhận thì không viết lambda được.</div>
+
+<h2>3 · Bên dưới: lambda không phải class ẩn danh viết gọn</h2>
+<p>Nhiều người nghĩ compiler tự đổi lambda thành class ẩn danh. Kiểm tra bằng <code>Indy.java</code>, có một class ẩn danh và một lambda làm cùng việc:</p>
+<pre><code>Runnable anDanh = new Runnable() { public void run() { System.out.println("ẩn danh"); } };
+Runnable lambda = () -&gt; System.out.println("lambda");</code></pre>
+<pre><code>javac Indy.java
+ls Indy*.class
+java Indy</code></pre>
+<div class="expect"><pre><code>Indy$1.class
+Indy.class
+ẩn danh
+lambda
+Class của ẩn danh: Indy$1
+Class của lambda:  <span class="hl">Indy$$Lambda/0x0000768410000c30</span></code></pre></div>
+<ul>
+  <li>Class ẩn danh sinh ra file <strong><code>Indy$1.class</code></strong> ngay lúc biên dịch.</li>
+  <li>Lambda <strong>không sinh file nào</strong>. Class của nó, <code>Indy$$Lambda/0x...</code>, được JVM tạo ra <em>lúc chạy</em>, chỉ tồn tại trong bộ nhớ (một "hidden class"; con số sau dấu <code>/</code> khác nhau mỗi lần chạy).</li>
+</ul>
+<p>Vậy lambda biến thành gì? Xem bytecode:</p>
+<pre><code>javap -c -p Indy | grep -E 'new .*Indy\$1|invokedynamic.*run|lambda\$'
+javap -v -p Indy | grep -A1 '^BootstrapMethods'</code></pre>
+<div class="expect"><pre><code>   0: new           #7    // class Indy$1
+   8: <span class="hl">invokedynamic</span> #10,  0   // InvokeDynamic #0:run:()Ljava/lang/Runnable;
+  <span class="hl">private static void lambda$main$0();</span>
+BootstrapMethods:
+  0: #67 REF_invokeStatic java/lang/invoke/<span class="hl">LambdaMetafactory.metafactory</span>:(...)</code></pre></div>
+<ol class="flow">
+  <li>Thân lambda được compiler chuyển thành một method <code>private static</code> tên <code>lambda$main$0</code>, nằm ngay trong class <code>Indy</code>.</li>
+  <li>Chỗ tạo lambda là lệnh <code>invokedynamic</code>. Lần đầu chạy tới đây, JVM gọi "người dựng" <code>LambdaMetafactory.metafactory</code>. Người dựng tạo ra một class nhỏ implements <code>Runnable</code>, có method <code>run()</code> gọi sang <code>lambda$main$0</code>.</li>
+  <li>Kết quả được JVM nhớ lại. Những lần sau chạy qua dòng này thì không phải dựng lại nữa.</li>
+</ol>
+<p><em>Vì sao không làm luôn class ẩn danh cho đơn giản?</em> Để không phải sinh hàng nghìn file <code>.class</code> (ứng dụng lớn có rất nhiều lambda), và để JVM được tự do đổi cách tạo lambda trong các phiên bản sau mà không phải biên dịch lại code của bạn.<a class="cite" href="https://cr.openjdk.org/~briangoetz/lambda/lambda-translation.html">[Brian Goetz: Translation of Lambda Expressions]</a></p>
+
+<div class="remember">Lambda → thân thành method <code>private static lambda$...</code> + chỗ tạo thành <code>invokedynamic</code>. Class cài interface được <code>LambdaMetafactory</code> dựng <strong>lúc chạy</strong> (không có file <code>.class</code>). Class ẩn danh thì sinh file <code>Outer$1.class</code> lúc biên dịch.</div>
+
+<h2>4 · Stream lười: không có thao tác cuối thì không chạy gì</h2>
+<div class="analogy">
+<p>Stream giống một <strong>dây chuyền</strong> trong xưởng: trạm lọc, trạm sơn, trạm đóng gói. Lắp xong dây chuyền thì chưa có sản phẩm nào chạy qua cả. Chỉ khi có <strong>đơn hàng</strong> ("cho tôi sản phẩm đầu tiên đạt chuẩn"), dây chuyền mới khởi động, và nó dừng ngay khi đủ hàng.</p>
+</div>
+<p>Các bước như <code>filter</code>, <code>map</code> gọi là thao tác <strong>trung gian</strong> (lắp trạm). Các bước như <code>findFirst</code>, <code>collect</code>, <code>count</code>, <code>forEach</code> là thao tác <strong>cuối</strong> (đặt hàng). <code>Lazy.java</code> in ra mỗi khi một trạm làm việc:</p>
+<pre><code>Stream&lt;Integer&gt; s = List.of(1, 2, 3, 4, 5, 6).stream()
+    .filter(x -&gt; { System.out.println("  filter " + x); return x % 2 == 0; })
+    .map(x -&gt; { System.out.println("  map " + x); return x * 10; });
+System.out.println("(chưa in gì ở trên)");
+
+s.findFirst().get();
+s.count();      // dùng lại stream đã dùng</code></pre>
+<p><strong>Đoán trước:</strong> có bao nhiêu dòng "filter" và "map" được in ra?</p>
+<pre><code>javac Lazy.java
+java Lazy</code></pre>
+<div class="expect"><pre><code>--- Chỉ khai báo, chưa có thao tác cuối:
+(chưa in gì ở trên)
+--- Gọi findFirst():
+  filter 1
+  filter 2
+  map 2
+Kết quả: 20
+--- Dùng lại stream đã dùng:
+java.lang.IllegalStateException: <span class="hl">stream has already been operated upon or closed</span></code></pre></div>
+<ol class="flow">
+  <li><strong>Lười:</strong> khai báo <code>filter</code> và <code>map</code> xong không in gì cả. Chỉ <code>findFirst()</code> mới làm dây chuyền chạy.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/stream/package-summary.html">[java.util.stream: "Streams are lazy"]</a></li>
+  <li><strong>Từng phần tử đi hết dây chuyền:</strong> không phải "lọc hết 6 số rồi mới map". Số 1 qua filter (bị loại), số 2 qua filter rồi qua map ngay.</li>
+  <li><strong>Dừng sớm:</strong> có kết quả đầu tiên (20) là dừng. Số 3, 4, 5, 6 không bao giờ được xét. Với dữ liệu lớn, điều này tiết kiệm rất nhiều.</li>
+  <li><strong>Dùng một lần:</strong> stream đã chạy xong thì không dùng lại được. Cần lại thì tạo stream mới từ list.</li>
+</ol>
+<p>Hệ quả thực tế: đừng đặt việc quan trọng (ghi log, lưu database) vào bên trong <code>map</code> hay <code>filter</code>, vì nó có thể không bao giờ chạy, hoặc chỉ chạy với một phần dữ liệu.</p>
+
+<h2>5 · <code>parallel()</code>: ba cái bẫy</h2>
+<p>Thêm <code>.parallel()</code> (hoặc dùng <code>parallelStream()</code>) thì dữ liệu được chia nhỏ cho nhiều thread xử lý cùng lúc. Nghe như "miễn phí nhanh hơn", nhưng có ba bẫy.</p>
+
+<h3>Bẫy 1 · Ghi vào biến dùng chung</h3>
+<p><code>ParallelRace.java</code> cho nhiều thread cùng <code>add</code> vào một <code>ArrayList</code> thường:</p>
+<pre><code>IntStream.range(0, 100_000).parallel().forEach(ketQua::add);   // ghi vào list dùng chung
+List&lt;Integer&gt; dung = IntStream.range(0, 100_000).parallel().boxed().collect(Collectors.toList());</code></pre>
+<pre><code>javac ParallelRace.java
+java ParallelRace</code></pre>
+<div class="expect"><pre><code>forEach + add: <span class="hl">10126 phần tử</span> (đúng phải là 100000)
+collect:       100000 phần tử
+Thứ tự forEach: <span class="hl">2 0 3 7 5 9 6 1 4 8</span>
+forEachOrdered: 0 1 2 3 4 5 6 7 8 9</code></pre></div>
+<p>Mất gần 90% dữ liệu, và không có lỗi nào báo ra (lần chạy khác có thể ném <code>ArrayIndexOutOfBoundsException</code>). Đây chính là race condition ở bài 12, chỉ là giấu sau một chữ <code>.parallel()</code>. Cách đúng: <strong>đừng tự ghi ra ngoài</strong>, mà để stream tự gom kết quả bằng <code>collect(...)</code>. Stream sẽ cho mỗi thread gom phần của mình rồi ghép lại an toàn. Tài liệu Java nói rõ: side-effect trong lambda của stream <em>"are, in general, discouraged"</em>.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/stream/package-summary.html#SideEffects">[java.util.stream: Side-effects]</a></p>
+
+<h3>Bẫy 2 · Mất thứ tự</h3>
+<p>Hai dòng cuối ở trên: <code>forEach</code> trên stream song song chạy theo thứ tự <em>thread nào xong trước</em>, mỗi lần một khác. Cần đúng thứ tự thì dùng <code>forEachOrdered</code> (hoặc <code>collect</code>, vì nó giữ thứ tự của list gốc), nhưng khi đó lợi ích song song giảm đi.</p>
+
+<h3>Bẫy 3 · Tất cả dùng chung một pool</h3>
+<p>Parallel stream chạy trên đâu? <code>CommonPool.java</code> cho 64 việc, mỗi việc "gọi API" mất 500 ms:</p>
+<pre><code>System.out.println("Độ song song của common pool: " + ForkJoinPool.commonPool().getParallelism());
+IntStream.range(0, 64).parallel().forEach(i -&gt; {
+    tenThread.add(Thread.currentThread().getName());
+    Thread.sleep(500);                                   // giả lập gọi API chậm
+});</code></pre>
+<pre><code>javac CommonPool.java
+java CommonPool</code></pre>
+<div class="expect"><pre><code>Số lõi CPU: 16
+Độ song song của common pool: <span class="hl">15</span>
+64 việc x 500ms chạy hết: <span class="hl">2006 ms</span>, dùng 16 thread
+  ForkJoinPool.commonPool-worker-1
+  ForkJoinPool.commonPool-worker-10
+  ForkJoinPool.commonPool-worker-11</code></pre></div>
+<ul>
+  <li>Mọi parallel stream trong cùng JVM đều chạy trên <strong>một pool chung</strong> tên <code>ForkJoinPool.commonPool</code>, với số thread = số lõi CPU − 1 (ở đây 15, cộng thread <code>main</code> cũng tham gia = 16).<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ForkJoinPool.html">[ForkJoinPool]</a></li>
+  <li>64 việc chia cho 16 thread = 4 lượt × 500 ms ≈ 2000 ms. Đúng như bài 15: việc vượt số thread thì phải chờ.</li>
+  <li>Nguy hiểm thật sự: nếu một request trong ứng dụng web dùng parallel stream để gọi API chậm, nó <strong>chiếm hết pool chung</strong>. Mọi parallel stream khác trong <em>cả ứng dụng</em> (và cả <code>CompletableFuture</code> không chỉ định executor) phải đứng chờ. Pool này sinh ra cho việc <strong>tính toán CPU</strong>, không phải để chờ I/O. Việc chờ I/O hãy dùng thread pool riêng hoặc virtual thread (bài 15).</li>
+</ul>
+
+<div class="remember">
+<strong>Chỉ dùng <code>parallel()</code> khi đủ cả 3 điều kiện:</strong> dữ liệu lớn, việc nặng về <em>tính toán</em> (không chờ I/O), và lambda không ghi vào biến dùng chung. Còn lại cứ dùng stream thường. Và luôn <strong>đo</strong> trước khi tin là nhanh hơn (bài 8).
+</div>
+
+<h2>6 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q20"></div>
+<script type="application/json" id="q20">[
+ {"q":"Một interface có <strong>hai</strong> method abstract. Gán lambda vào kiểu interface đó thì sao?",
+  "options":["Lambda cài method abstract đầu tiên","Lambda cài cả hai method cùng lúc","Lỗi biên dịch: không phải functional interface","Chạy được, gọi method thứ hai thì lỗi"],
+  "answer":2,
+  "why":"Lambda chỉ có một thân, nên chỉ cài được interface có <strong>đúng một</strong> method abstract (functional interface). Compiler không đoán được thân đó dành cho method nào."},
+ {"q":"Biên dịch một class có <strong>một lambda</strong> và không có class ẩn danh nào. Có thêm file <code>.class</code> nào cho lambda không?",
+  "options":["Không, class lambda dựng lúc chạy","Có, một file Outer$1.class riêng","Có, một file Outer$$Lambda.class","Chỉ có nếu lambda dùng biến ngoài"],
+  "answer":0,
+  "why":"Lambda thành method <code>private static lambda$...</code> trong class hiện tại, cộng một lệnh <code>invokedynamic</code>. Class cài interface do <code>LambdaMetafactory</code> dựng lúc chạy, chỉ nằm trong bộ nhớ."},
+ {"q":"<code>List.of(1,2,3,4).stream().filter(x -&gt; { System.out.println(x); return x &gt; 1; });</code> (không có gì thêm). In ra gì?",
+  "options":["In 1 2 3 4, mỗi số một dòng","Chỉ in 2 3 4 vì 1 bị lọc","Chỉ in 1 rồi dừng lại","Không in gì cả"],
+  "answer":3,
+  "why":"Không có thao tác cuối (<code>collect</code>, <code>count</code>, <code>findFirst</code>...) thì stream không chạy. <code>filter</code> chỉ \"lắp trạm\" vào dây chuyền."},
+ {"q":"<code>list.parallelStream().forEach(x -&gt; ketQua.add(x))</code> với <code>ketQua</code> là <code>ArrayList</code>. Rủi ro chính là gì?",
+  "options":["Chạy chậm hơn stream thường một chút","Mất phần tử do nhiều thread cùng add","Lỗi biên dịch vì add trong lambda","ketQua tự sắp xếp lại khi kết thúc"],
+  "answer":1,
+  "why":"<code>ArrayList</code> không an toàn khi nhiều thread cùng ghi (race condition, bài 12). Demo mất khoảng 90% phần tử. Dùng <code>collect(Collectors.toList())</code> để stream tự gom an toàn."},
+ {"q":"(Ôn bài 15) Vì sao không nên dùng parallel stream để gọi nhiều API chậm trong ứng dụng web?",
+  "options":["Vì parallel stream không gọi được API","Vì stream song song luôn sai thứ tự","Vì nó chiếm pool chung của cả JVM","Vì mỗi phần tử tạo một thread mới"],
+  "answer":2,
+  "why":"Mọi parallel stream dùng chung <code>ForkJoinPool.commonPool</code> (số lõi − 1 thread). Việc chờ I/O chiếm thread mà không dùng CPU, làm mọi parallel stream khác trong ứng dụng phải chờ. Việc I/O nên dùng pool riêng hoặc virtual thread."}
+]</script>
+
+<h2>7 · Thử thách: sửa bộ đếm song song</h2>
+<div class="lab">
+<p><code>Challenge.java</code> đếm số từ theo độ dài, có 200 000 từ dài từ 1 đến 5 ký tự (mỗi độ dài đúng 40 000 từ):</p>
+<pre><code>// TODO: đếm số từ theo độ dài. Code dưới đây SAI khi chạy parallel. Sửa lại.
+Map&lt;Integer, Integer&gt; dem = new HashMap&lt;&gt;();
+tu.parallelStream().forEach(w -&gt; dem.merge(w.length(), 1, Integer::sum));</code></pre>
+<pre><code>javac Challenge.java
+java Challenge</code></pre>
+<div class="expect"><pre><code>{1=16039, 2=16449, 3=13337, 4=16134, 5=16079}  (mỗi độ dài đúng phải là 40000)</code></pre></div>
+<p><strong>Nhiệm vụ:</strong> sửa sao cho kết quả đúng mà <em>vẫn giữ</em> <code>parallelStream()</code>, và không dùng <code>synchronized</code>. Gợi ý: đừng ghi ra <code>HashMap</code> bên ngoài; để stream tự gom bằng <code>collect</code>. Tìm trong <code>Collectors</code> một method "nhóm theo" (group by), kết hợp với một method "đếm".</p>
+<details><summary>Xem lời giải</summary>
+<pre><code>Map&lt;Integer, Long&gt; dem = tu.parallelStream()
+        .collect(Collectors.groupingBy(String::length, Collectors.counting()));</code></pre>
+<div class="expect"><pre><code>{1=40000, 2=40000, 3=40000, 4=40000, 5=40000}</code></pre></div>
+<p>Mỗi thread gom vào map <em>riêng</em> của mình, rồi stream ghép các map lại khi xong. Không có hai thread nào ghi vào cùng một chỗ, nên không cần khoá. Đổi sang <code>ConcurrentHashMap</code> cũng cho kết quả đúng, nhưng <code>collect</code> là cách "đúng tinh thần stream": không có side-effect.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: lambda có tốn bộ nhớ mỗi lần chạy không?</summary>
+<p>Tuỳ lambda có "bắt" (capture) biến bên ngoài hay không:</p>
+<ul>
+  <li><strong>Không bắt biến nào</strong> (<code>() -&gt; System.out.println("hi")</code>): HotSpot hiện nay thường trả về <em>cùng một object</em> cho mọi lần chạy qua dòng đó. Đây là cách cài đặt của JDK, không phải điều spec hứa, nên đừng so sánh lambda bằng <code>==</code>.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.27.4">[JLS §15.27.4]</a></li>
+  <li><strong>Có bắt biến</strong> (<code>x -&gt; x * heSo</code>, với <code>heSo</code> là biến cục bộ): mỗi lần tạo là một object mới, mang theo bản sao giá trị <code>heSo</code>. Vì là <em>bản sao</em> nên biến phải effectively final (bài 16): nếu được gán lại, bản sao trong lambda và biến gốc sẽ lệch nhau.</li>
+</ul>
+<p>Trong code bình thường, chi phí này không đáng kể: JIT (bài 8) còn có thể inline lambda và bỏ luôn việc tạo object (escape analysis, bài 9).</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://dev.java/learn/lambdas/">dev.java: Lambda Expressions</a> và <a href="https://dev.java/learn/api/streams/">dev.java: The Stream API</a>, hai loạt bài chính thức của Oracle, dễ đọc. Muốn hiểu bên dưới: <a href="https://cr.openjdk.org/~briangoetz/lambda/lambda-translation.html">Brian Goetz: Translation of Lambda Expressions</a> (người thiết kế lambda của Java). Đọc kỹ mục "Side-effects" và "Laziness" trong <a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/stream/package-summary.html">Javadoc java.util.stream</a>.</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "<code>map</code> khác <code>flatMap</code> thế nào?", "<code>Optional</code> dùng sao cho đúng?", "<code>this</code> trong lambda trỏ tới đâu?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0020-generics.html">← Bài 20: Generics và type erasure</a><a href="0022-inner-vs-static-nested.html">Bài 22: Inner class vs static nested →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race condition</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Hai thread cùng đếm, vì sao mất gần một nửa?</h1>
+<p class="subtitle">Bài 12 · Thread, race condition, và hai cách sửa: <code>synchronized</code> và <code>AtomicInteger</code></p>
+<div class="meta"><span>~35 phút</span><span>Cần biết: <a href="0001-tu-source-den-bytecode.html">Bài 1</a> (bytecode), <a href="0011-hashmap-ben-trong.html">Bài 11</a> (HashMap)</span><span>Thư mục thực hành: <code>lab/l0012</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Tự tạo ra một <strong>race condition</strong> và giải thích được vì sao kết quả sai.</li>
+  <li>Sửa được bằng <code>synchronized</code> hoặc <code>AtomicInteger</code>.</li>
+  <li>Hiểu vì sao field trong một Spring <code>@Service</code> rất dễ dính lỗi này.</li>
+</ul>
+
+<h2>1 · Ôn bài 11 (trả lời trong đầu trước)</h2>
+<div class="callout">Ở cuối bài 11 có nhắc một điểm yếu của <code>HashMap</code> khi dùng với nhiều thread. Điểm yếu đó là gì?
+<details><summary>Kiểm tra</summary><code>HashMap</code> <strong>không thread-safe</strong>: nhiều thread cùng <code>put</code> có thể làm mất dữ liệu. Hôm nay bạn sẽ tận mắt thấy điều đó, và hiểu tận gốc vì sao.</details></div>
+
+<h2>2 · Thread là gì?</h2>
+<p>Từ trước tới giờ, các chương trình của ta chỉ có <strong>một</strong> dòng chạy: lệnh này xong mới tới lệnh kia. Một <span class="term">thread</span> (luồng) là một dòng chạy như vậy. Một chương trình có thể có <strong>nhiều thread chạy cùng lúc</strong>, mỗi thread làm việc riêng của nó. Máy bạn có 16 lõi CPU, nên có thể chạy thật sự 16 thread song song.</p>
+<pre><code>Thread t1 = new Thread(task);   // tạo thread, giao cho nó việc "task"
+t1.start();                     // bắt đầu chạy (song song với main)
+t1.join();                      // main đứng chờ t1 chạy xong</code></pre>
+<p>Ngoài đời, bạn dùng thread mỗi ngày mà không để ý: server Spring Boot (Tomcat) phục vụ <strong>mỗi request bằng một thread</strong>, nên 100 người dùng cùng lúc tức là 100 thread chạy cùng lúc.</p>
+
+<h2>3 · Thí nghiệm: hai thread cùng đếm</h2>
+<p>Mở <code>Race.java</code>. Hai thread, mỗi thread tăng biến chung <code>count</code> thêm 100 000 lần:</p>
+<pre><code>static int count = 0;
+
+Runnable task = () -&gt; {
+    for (int i = 0; i &lt; 100_000; i++) {
+        count++;
+    }
+};
+// tạo t1, t2 cùng chạy task, start cả hai, rồi join chờ cả hai xong</code></pre>
+<p><strong>Đoán trước:</strong> 2 × 100 000 = 200 000. Kết quả có đúng 200 000 không?</p>
+<pre><code>cd lab/l0012
+javac *.java
+java Race
+java Race
+java Race</code></pre>
+<div class="expect"><pre><code>Mong đợi: 200000, thực tế: 105052
+Mong đợi: 200000, thực tế: 112294
+Mong đợi: 200000, thực tế: 109479</code></pre>
+<p style="margin:0">(Số trên máy bạn sẽ khác, và khác nhau sau mỗi lần chạy.)</p></div>
+<p>Mất gần <strong>một nửa</strong>, và mỗi lần chạy mất một số lượng khác nhau. Không có lỗi nào được báo, chương trình chỉ âm thầm cho ra kết quả sai. Đây là kiểu bug đáng sợ nhất.</p>
+
+<h2>4 · Vì sao? <code>count++</code> không phải một bước</h2>
+<p>Ở bài 1 ta đã biết đọc bytecode. Xem <code>count++</code> thực sự là gì:</p>
+<pre><code>javap -c -p Race</code></pre>
+<div class="expect"><pre><code> 8: getstatic  count    // 1. ĐỌC giá trị count
+11: iconst_1
+12: iadd                // 2. CỘNG thêm 1
+13: putstatic  count    // 3. GHI kết quả lại vào count</code></pre></div>
+<p>Một dòng <code>count++</code> thật ra là <strong>3 bước riêng biệt</strong>: đọc → cộng → ghi.<a class="cite" href="https://docs.oracle.com/javase/tutorial/essential/concurrency/interfere.html">[Oracle Tutorial: Thread Interference]</a> Giữa các bước đó, thread khác hoàn toàn có thể chen vào.</p>
+
+<div class="analogy">
+<p>Hai thu ngân cùng cập nhật một con số trên bảng kiểm kê, đang ghi <strong>5</strong>:</p>
+<ul>
+  <li>Thu ngân A nhìn bảng: <strong>5</strong>. Tính nhẩm: 5 + 1 = 6.</li>
+  <li>Đúng lúc đó, thu ngân B cũng nhìn bảng: vẫn là <strong>5</strong>. Tính nhẩm: 6.</li>
+  <li>A xoá bảng, viết <strong>6</strong>. B xoá bảng, viết <strong>6</strong>.</li>
+</ul>
+<p>Hai người đều bán được hàng, nhưng con số chỉ tăng <strong>1</strong>. Một lần tăng đã <strong>biến mất</strong>.</p>
+</div>
+
+<table>
+  <tr><th>Thời điểm</th><th>Thread 1</th><th>Thread 2</th><th>count</th></tr>
+  <tr><td>1</td><td>đọc count → 5</td><td></td><td>5</td></tr>
+  <tr><td>2</td><td></td><td>đọc count → 5</td><td>5</td></tr>
+  <tr><td>3</td><td>cộng → 6</td><td></td><td>5</td></tr>
+  <tr><td>4</td><td></td><td>cộng → 6</td><td>5</td></tr>
+  <tr><td>5</td><td>ghi 6</td><td></td><td>6</td></tr>
+  <tr><td>6</td><td></td><td>ghi 6</td><td class="bad-hl">6 (đáng lẽ 7)</td></tr>
+</table>
+<p>Khi kết quả phụ thuộc vào việc thread nào chạy trước, thread nào chen vào giữa, ta gọi đó là <span class="term">race condition</span> (tình trạng tranh chấp). Lặp 200 000 lần thì chuyện "chen ngang" xảy ra hàng chục nghìn lần.</p>
+
+<div class="remember">Một thao tác <strong>đọc → sửa → ghi</strong> trên dữ liệu <strong>dùng chung</strong> giữa nhiều thread mà không có bảo vệ gì thì sẽ mất dữ liệu. <code>count++</code>, <code>x = x + 1</code>, <code>map.put(...)</code> đều thuộc loại này.</div>
+
+<h2>5 · Cách sửa 1: <code>synchronized</code>, khoá cửa lại</h2>
+<div class="analogy">
+<p>Đặt bảng kiểm kê vào một <strong>căn phòng có một chìa khoá duy nhất</strong>. Ai muốn sửa con số thì phải cầm chìa, vào phòng, sửa xong mới ra trả chìa. Người khác muốn sửa thì <strong>đứng chờ ngoài cửa</strong>.</p>
+</div>
+<p>Mở <code>FixSync.java</code>:</p>
+<pre><code>static final Object lock = new Object();   // "chìa khoá"
+...
+synchronized (lock) {    // mỗi lúc chỉ MỘT thread được vào
+    count++;
+}</code></pre>
+<pre><code>java FixSync</code></pre>
+<div class="expect"><pre><code>Mong đợi: 200000, thực tế: 200000</code></pre></div>
+<p>Khối <code>synchronized</code> đảm bảo ba bước đọc → cộng → ghi của một thread chạy xong trọn vẹn rồi thread khác mới được vào.<a class="cite" href="https://docs.oracle.com/javase/tutorial/essential/concurrency/locksync.html">[Oracle Tutorial: Intrinsic Locks]</a> Cái giá phải trả: các thread phải xếp hàng chờ nhau, nên chậm hơn.</p>
+
+<h2>6 · Cách sửa 2: <code>AtomicInteger</code>, máy đếm bấm</h2>
+<div class="analogy">
+<p>Thay bảng viết tay bằng một <strong>máy đếm bấm tay</strong>: mỗi lần bấm, số tự nhảy lên 1. Không ai phải "đọc, tính nhẩm, rồi viết". Một cú bấm là trọn vẹn, không thể bị chen ngang.</p>
+</div>
+<p>Mở <code>FixAtomic.java</code>:</p>
+<pre><code>static AtomicInteger count = new AtomicInteger();
+...
+count.incrementAndGet();   // tăng 1, làm trọn vẹn trong một bước</code></pre>
+<pre><code>java FixAtomic</code></pre>
+<div class="expect"><pre><code>Mong đợi: 200000, thực tế: 200000</code></pre></div>
+<p><code>AtomicInteger</code> dùng một lệnh đặc biệt của CPU để làm cả "đọc → cộng → ghi" trong <strong>một bước không thể chia cắt</strong> (gọi là <span class="term">atomic</span>, nguyên tử).<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/atomic/AtomicInteger.html">[AtomicInteger Javadoc]</a> Với một biến đếm đơn giản, đây là lựa chọn gọn và nhanh nhất.</p>
+
+<table>
+  <tr><th>Tình huống</th><th>Nên dùng</th></tr>
+  <tr><td>Đếm, cộng dồn một con số dùng chung</td><td><code>AtomicInteger</code> / <code>AtomicLong</code></td></tr>
+  <tr><td>Map dùng chung giữa nhiều thread</td><td><code>ConcurrentHashMap</code></td></tr>
+  <tr><td>Nhiều bước phải đi cùng nhau (ví dụ trừ tiền tài khoản A <em>và</em> cộng vào tài khoản B)</td><td><code>synchronized</code> (hoặc lock)</td></tr>
+</table>
+
+<h2>7 · Chuyện này xảy ra ở đâu khi đi làm?</h2>
+<p>Trong Spring, mỗi <code>@Service</code> hay <code>@Controller</code> mặc định chỉ có <strong>một object duy nhất</strong> (singleton).<a class="cite" href="https://docs.spring.io/spring-framework/reference/core/beans/factory-scopes.html">[Spring: Bean Scopes]</a> Mà mỗi request lại chạy trên một thread riêng. Nghĩa là <strong>mọi request cùng dùng chung các field của service đó</strong>:</p>
+<pre><code>@Service
+public class ViewService {
+    private int views = 0;                          <span class="bad-hl">// dùng chung cho MỌI request</span>
+    private Map&lt;Long, Product&gt; cache = new HashMap&lt;&gt;(); <span class="bad-hl">// cũng dùng chung</span>
+
+    public void onView() { views++; }               <span class="bad-hl">// race condition!</span>
+}</code></pre>
+<p>Lúc test một mình trên máy thì đếm đúng. Lên production, 200 người xem cùng lúc thì số lượt xem bị thiếu, còn <code>cache</code> có thể mất dữ liệu. Cách sửa: <code>AtomicInteger</code> cho <code>views</code>, <code>ConcurrentHashMap</code> cho <code>cache</code>. Tốt hơn nữa là thiết kế service <strong>không giữ dữ liệu thay đổi</strong> trong field.</p>
+
+<div class="callout"><strong>Câu phỏng vấn: "Race condition là gì? Sửa thế nào?"</strong>
+<p><em>"Race condition là khi nhiều thread cùng đọc và ghi một dữ liệu dùng chung, và kết quả phụ thuộc vào thứ tự chen ngang của các thread. Ví dụ kinh điển là <code>count++</code>: nó gồm ba bước đọc, cộng, ghi, nên hai thread có thể cùng đọc một giá trị cũ và một lần tăng bị mất. Cách sửa: dùng <code>synchronized</code> để chỉ một thread vào một lúc, hoặc dùng class atomic như <code>AtomicInteger</code>, hoặc collection thread-safe như <code>ConcurrentHashMap</code>. Trong Spring, bean mặc định là singleton, nên field có thể thay đổi trong service là nguồn race condition rất phổ biến."</em></p></div>
+
+<h2>8 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q10"></div>
+<script type="application/json" id="q10">[
+ {"q":"Vì sao hai thread cùng chạy <code>count++</code> 100 000 lần lại ra ít hơn 200 000?",
+  "options":["Vì JVM giới hạn mỗi biến chỉ đếm tới 100 000","Vì count++ gồm đọc, cộng, ghi, bị chen ngang","Vì thread thứ hai chưa kịp chạy thì đã tắt","Vì GC xoá mất một số lần tăng ở giữa chừng"],
+  "answer":1,"why":"Bytecode cho thấy <code>count++</code> là <code>getstatic</code> → <code>iadd</code> → <code>putstatic</code>. Hai thread cùng đọc một giá trị cũ, cùng ghi cùng một kết quả, và một lần tăng bị mất."},
+ {"q":"Khối <code>synchronized (lock) { count++; }</code> sửa được lỗi vì sao?",
+  "options":["Vì nó làm count++ chạy nhanh gấp đôi","Vì nó tự chuyển count thành kiểu long","Vì mỗi lúc chỉ một thread được vào khối","Vì nó tắt bớt một thread cho an toàn"],
+  "answer":2,"why":"Chỉ thread đang giữ \"chìa khoá\" <code>lock</code> mới được vào khối, các thread khác phải chờ. Nhờ vậy ba bước đọc, cộng, ghi của một thread luôn chạy trọn vẹn."},
+ {"q":"Một <code>@Service</code> Spring có field <code>private int views</code> và method <code>views++</code>. Có vấn đề gì?",
+  "options":["Không sao, vì mỗi request có service riêng","Không sao, vì Spring tự khoá mọi method","Lỗi biên dịch vì field phải là static","Race condition, vì mọi request dùng chung"],
+  "answer":3,"why":"Bean Spring mặc định là singleton: một object dùng chung cho mọi request, mỗi request lại chạy trên một thread. Nên <code>views++</code> bị race condition. Sửa bằng <code>AtomicInteger</code>."},
+ {"q":"Hai thread cùng <code>put</code> vào một <code>Map</code> dùng chung. Nên dùng loại Map nào?",
+  "options":["ConcurrentHashMap, vì nó thread-safe","HashMap, nhưng tạo trước 1000 ngăn","LinkedHashMap, vì nó giữ thứ tự thêm","TreeMap, vì nó luôn sắp xếp theo key"],
+  "answer":0,"why":"<code>HashMap</code> (và cả LinkedHashMap, TreeMap) không thread-safe. Trong thí nghiệm, <code>HashMap</code> mất khoảng 25% phần tử. <code>ConcurrentHashMap</code> được thiết kế cho việc dùng chung giữa nhiều thread."},
+ {"q":"(Ôn bài 11) Hai key khác nhau nhưng có cùng <code>hashCode</code>. HashMap xử lý thế nào?",
+  "options":["Ghi đè key cũ, chỉ giữ lại key mới","Để chung một ngăn, phân biệt bằng equals","Ném lỗi vì hai hashCode bị trùng nhau","Tự đổi hashCode của key mới đi chỗ khác"],
+  "answer":1,"why":"Cùng hashCode thì cùng ngăn (collision). Trong ngăn, HashMap so từng key bằng <code>equals</code> nên vẫn giữ và tìm đúng cả hai, như ví dụ <code>\"Aa\"</code> và <code>\"BB\"</code>."}
+]</script>
+
+<h2>9 · Thử thách: sửa <code>MapRace.java</code></h2>
+<div class="lab">
+<p><code>MapRace.java</code> cho hai thread cùng <code>put</code> 50 000 phần tử (mỗi thread một khoảng key riêng, không trùng nhau) vào một <code>HashMap</code> dùng chung. <strong>Đoán trước</strong> rồi chạy:</p>
+<pre><code>java MapRace</code></pre>
+<div class="expect"><pre><code>Mong đợi: 100000 phần tử, thực tế: 72847</code></pre></div>
+<p>Hai thread không hề dùng chung key nào, vậy mà vẫn mất khoảng 25%. Lý do: cả hai cùng sửa cấu trúc <em>bên trong</em> của HashMap (các ngăn, biến <code>size</code>, lúc resize...). Bài 11 đã cho thấy mấy thứ đó đều là "đọc, sửa, ghi". Javadoc của HashMap cảnh báo rõ: <em>"Note that this implementation is not synchronized."</em><a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/HashMap.html">[HashMap Javadoc]</a></p>
+<p><strong>Nhiệm vụ:</strong> sửa <strong>đúng 2 dòng</strong> trong <code>MapRace.java</code> để luôn ra 100 000.</p>
+<details><summary>Xem lời giải</summary>
+<pre><code>import java.util.concurrent.ConcurrentHashMap;     // dòng 1: đổi import
+...
+Map&lt;Integer, Integer&gt; map = new ConcurrentHashMap&lt;&gt;();   // dòng 2: đổi class</code></pre>
+<div class="expect"><pre><code>Mong đợi: 100000 phần tử, thực tế: 100000</code></pre></div>
+<p>Vì biến <code>map</code> khai báo kiểu <code>Map</code> (interface), bạn chỉ cần đổi chỗ <code>new</code>, phần còn lại của code giữ nguyên. Đây là một lợi ích thực tế của việc "khai báo theo interface".<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html">[ConcurrentHashMap Javadoc]</a></p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: còn một vấn đề nữa, "nhìn thấy" (visibility)</summary>
+<p>Race condition không phải là vấn đề duy nhất của thread. Mỗi lõi CPU có bộ nhớ đệm (cache) riêng, và JIT (bài 8) có thể tối ưu bằng cách giữ giá trị của biến trong thanh ghi. Vì vậy một thread <strong>ghi</strong> giá trị mới vào biến, nhưng thread khác có thể <strong>không nhìn thấy</strong> giá trị đó, thậm chí rất lâu.</p>
+<p><code>synchronized</code> giải quyết cả hai vấn đề: vừa cho một thread vào một lúc, vừa đảm bảo thread vào sau <em>nhìn thấy</em> những gì thread trước đã ghi. Ngoài ra còn từ khoá <code>volatile</code>, chỉ lo phần "nhìn thấy" chứ <strong>không</strong> làm <code>count++</code> trở nên an toàn. Bộ quy tắc đầy đủ về chuyện này gọi là <em>Java Memory Model</em>, sẽ là chủ đề của một bài sau.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/essential/concurrency/interfere.html">Oracle Java Tutorial: Thread Interference</a>, rồi đọc tiếp các trang <a href="https://docs.oracle.com/javase/tutorial/essential/concurrency/syncmeth.html">Synchronized Methods</a> và <a href="https://docs.oracle.com/javase/tutorial/essential/concurrency/locksync.html">Intrinsic Locks</a>. Bài ngắn, dùng đúng ví dụ <code>c++</code> như bài này. Khi muốn học concurrency nghiêm túc thì đọc cuốn <a href="https://jcip.net/"><em>Java Concurrency in Practice</em></a> (Brian Goetz) đã có trong <code>RESOURCES.md</code>, chương 2 "Thread Safety".</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "vì sao không đánh dấu luôn mọi method là synchronized cho chắc?", "local variable trong method có bị race condition không?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0011-hashmap-ben-trong.html">← Bài 11: HashMap bên trong</a><a href="0013-deadlock-thread-dump.html">Bài 13: Deadlock và thread dump →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

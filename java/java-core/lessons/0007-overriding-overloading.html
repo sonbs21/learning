@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overloading và Overriding</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Overloading và Overriding: ai chọn method, và chọn lúc nào?</h1>
+<p class="subtitle">Bài 7 · Hai chữ nghe giống nhau, nhưng một bên do <strong>compiler</strong> quyết định lúc biên dịch, bên kia do <strong>JVM</strong> quyết định lúc chạy</p>
+<div class="meta"><span>~35 phút</span><span>Cần biết: <a href="0003-equals-hashcode.html">Bài 3</a> (equals), <a href="0006-this-super.html">Bài 6</a> (this, super)</span><span>Thư mục thực hành: <code>lab/l0007</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Phân biệt overloading và overriding bằng <em>một câu</em>: ai chọn method, và chọn dựa vào cái gì.</li>
+  <li>Đoán đúng output của câu hỏi phỏng vấn kinh điển "biến kiểu cha, object kiểu con".</li>
+  <li>Hiểu vì sao <code>equals(Diem o)</code> làm <code>HashSet</code> "mất trí nhớ", và vì sao luôn phải gắn <code>@Override</code>.</li>
+  <li>Biết vì sao Spring không chặn được method <code>final</code>, <code>private</code>, <code>static</code>.</li>
+</ul>
+
+<h2>1 · Ôn bài 3 và bài 6 (trả lời trong đầu trước)</h2>
+<div class="callout">
+<p>(a) Muốn <code>HashSet</code> coi hai object "cùng nội dung" là một, class phải viết lại hai method nào? Tham số của <code>equals</code> có kiểu gì?</p>
+<p>(b) Ở bài 6, constructor <code>Cha()</code> gọi <code>gioiThieu()</code>, nhưng lại chạy bản của <code>Con</code>. Vì sao?</p>
+<details><summary>Kiểm tra</summary>(a) <code>equals</code> và <code>hashCode</code>; tham số của <code>equals</code> là <code>Object</code>. Mục 6 sẽ cho thấy chuyện gì xảy ra khi viết sai kiểu đó. (b) Vì lời gọi method được chọn theo <strong>kiểu thật của object</strong> (object đang tạo là <code>Con</code>), không theo class chứa dòng code. Hôm nay bạn sẽ thấy cơ chế đó tận mắt, và gặp "người anh em" chạy theo luật ngược lại.</details></div>
+
+<h2>2 · Hai câu chuyện để nhớ</h2>
+
+<div class="analogy">
+<p><strong>Overloading giống một từ có nhiều nghĩa.</strong> Chữ "mở" trong "mở cửa", "mở máy", "mở nhạc" là ba hành động khác nhau. Người nghe biết là hành động nào <em>ngay khi nghe câu</em>, chỉ bằng cách nhìn chữ đi kèm. Không cần chờ xem cánh cửa trông thế nào.</p>
+<p><strong>Overriding giống một quy định chung mà mỗi người làm theo cách riêng.</strong> Quản lý nói "nhân viên đứng quầy hãy chào khách". Câu nói chỉ có một, nhưng người <em>thật sự</em> đang đứng quầy là ai thì chào theo kiểu người đó: người cúi đầu, người bắt tay. Phải tới lúc khách bước vào mới biết là kiểu chào nào.</p>
+</div>
+
+<p>Đổi sang ngôn ngữ Java:</p>
+<table>
+<tr><th></th><th>Overloading (nạp chồng)</th><th>Overriding (ghi đè)</th></tr>
+<tr><td>Là gì</td><td>Nhiều method <strong>cùng tên, khác tham số</strong></td><td>Class con viết lại method của cha, <strong>giữ nguyên tên và tham số</strong></td></tr>
+<tr><td>Ai chọn bản nào</td><td><strong>Compiler</strong> (<code>javac</code>)</td><td><strong>JVM</strong></td></tr>
+<tr><td>Chọn lúc nào</td><td>Lúc biên dịch</td><td>Lúc chạy</td></tr>
+<tr><td>Dựa vào</td><td><strong>Kiểu khai báo</strong> của đối số (chữ viết trong code)</td><td><strong>Kiểu thật</strong> của object (object nằm trên heap)</td></tr>
+</table>
+<p>Cả bài này chỉ để làm rõ bảng trên. Ta đi từng cột.</p>
+
+<h2>3 · Overloading: cùng tên, khác tham số</h2>
+<p>Mở <code>Overload.java</code>. Có ba method cùng tên <code>tong</code>:</p>
+<pre><code>static int tong(int a, int b)           { return a + b; }
+static double tong(double a, double b)  { return a + b; }
+static int tong(int a, int b, int c)    { return a + b + c; }
+
+System.out.println(tong(1, 2));        // (int, int)
+System.out.println(tong(1.5, 2.5));    // (double, double)
+System.out.println(tong(1, 2, 3));     // (int, int, int)</code></pre>
+<pre><code>cd lab/l0007
+javac Overload.java
+java Overload</code></pre>
+<div class="expect"><pre><code>3
+4.0
+6</code></pre></div>
+<p>Compiler nhìn vào các đối số (<code>1, 2</code> là hai <code>int</code>; <code>1.5, 2.5</code> là hai <code>double</code>) rồi chọn bản khớp. Việc này xong <em>trước khi chương trình chạy</em>.</p>
+
+<p>Thứ để phân biệt các bản overload gọi là <strong>chữ ký method</strong> (signature). Chữ ký là <em>tên method + danh sách kiểu tham số</em>. Kiểu trả về <strong>không</strong> nằm trong chữ ký.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.4.2">[JLS §8.4.2]</a> Vì vậy hai method chỉ khác kiểu trả về sẽ bị báo lỗi. File <code>loi/ReturnOnly.java</code>:</p>
+<pre><code>int tinh(int a)    { return a; }
+double tinh(int a) { return a; }   // chỉ khác kiểu trả về</code></pre>
+<pre><code>javac loi/ReturnOnly.java</code></pre>
+<div class="expect"><pre><code>loi/ReturnOnly.java:3: error: <span class="hl">method tinh(int) is already defined</span> in class ReturnOnly</code></pre></div>
+<p>Nghĩ theo cách của compiler sẽ thấy hợp lý: gặp dòng <code>tinh(5);</code> (không dùng kết quả), nó không có cách nào biết bạn muốn bản nào.</p>
+
+<div class="remember"><strong>Overload</strong> = cùng tên, <strong>khác danh sách tham số</strong> (số lượng, kiểu, hoặc thứ tự). Compiler chọn bản nào ngay lúc biên dịch. Khác mỗi kiểu trả về thì không tính.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.4.9">[JLS §8.4.9]</a></div>
+
+<h2>4 · Overriding: con viết lại method của cha</h2>
+<p>Mở <code>DaHinh.java</code> ("đa hình", tiếng Anh là polymorphism):</p>
+<pre><code>static class DongVat { String keu() { return "..."; } }
+static class Cho extends DongVat { @Override String keu() { return "Gâu gâu"; } }
+static class Meo extends DongVat { @Override String keu() { return "Meo meo"; } }
+
+DongVat[] chuong = { new DongVat(), new Cho(), new Meo() };
+for (DongVat d : chuong) {
+    System.out.println(d.getClass().getSimpleName() + ": " + d.keu());
+}</code></pre>
+<pre><code>javac DaHinh.java
+java DaHinh</code></pre>
+<div class="expect"><pre><code>DongVat: ...
+Cho: <span class="hl">Gâu gâu</span>
+Meo: <span class="hl">Meo meo</span></code></pre></div>
+<p>Biến <code>d</code> luôn được <em>khai báo</em> là <code>DongVat</code>, và dòng <code>d.keu()</code> chỉ được viết một lần. Vậy mà mỗi vòng lặp lại chạy một bản khác nhau. Lý do: JVM nhìn vào <strong>object thật</strong> mà <code>d</code> đang trỏ tới, rồi chạy bản <code>keu()</code> của class đó. Cơ chế này gọi là <strong>dynamic dispatch</strong> ("chọn động", tức chọn lúc chạy).</p>
+
+<p><code>@Override</code> là một annotation, kiểu như ghi chú gửi compiler: "tôi định override method của cha, kiểm tra giúp tôi". Không bắt buộc, nhưng bạn sẽ thấy ở mục 6 nó cứu bạn thế nào.</p>
+
+<p>Override phải theo vài luật. Bạn không cần thuộc lòng, chỉ cần nhớ ý chính là <strong>"bản của con phải dùng thay được bản của cha"</strong>:<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.4.8.3">[JLS §8.4.8.3]</a></p>
+<ul>
+  <li><strong>Cùng chữ ký</strong> (tên + kiểu tham số). Khác tham số thì thành overload, không phải override.</li>
+  <li><strong>Kiểu trả về</strong> giống của cha, hoặc là class con của kiểu đó (gọi là covariant return).</li>
+  <li><strong>Quyền truy cập không được hẹp hơn.</strong> Cha là <code>public</code> mà con là <code>protected</code> thì code đang gọi qua cha sẽ không gọi được nữa.</li>
+  <li>Không được ném thêm <strong>checked exception</strong> mới hoặc rộng hơn bản của cha.</li>
+</ul>
+<p>Thử luật thứ ba. <code>loi/WeakerAccess.java</code> override <code>toString()</code> (vốn là <code>public</code> trong <code>Object</code>) thành <code>protected</code>:</p>
+<pre><code>javac loi/WeakerAccess.java</code></pre>
+<div class="expect"><pre><code>loi/WeakerAccess.java:3: error: toString() in WeakerAccess cannot override toString() in Object
+  <span class="hl">attempting to assign weaker access privileges; was public</span></code></pre></div>
+
+<div class="remember"><strong>Override</strong> = class con viết lại method của cha, <strong>cùng chữ ký</strong>. Lúc chạy, JVM chọn bản của <strong>object thật</strong>, không quan tâm biến được khai báo kiểu gì.</div>
+
+<h2>5 · Cái bẫy: đặt hai thứ cạnh nhau</h2>
+<p>Đây là câu hỏi phỏng vấn kinh điển. <code>Trap.java</code> có <em>cả</em> override lẫn overload:</p>
+<pre><code>static class DongVat { String keu() { return "..."; } }
+static class Cho extends DongVat { @Override String keu() { return "Gâu gâu"; } }
+
+static String loai(DongVat d) { return "loai(DongVat)"; }   // overload 1
+static String loai(Cho c)     { return "loai(Cho)"; }       // overload 2
+
+DongVat a = new Cho();        // khai báo DongVat, object thật là Cho
+System.out.println(a.keu());
+System.out.println(loai(a));</code></pre>
+<p><strong>Dừng lại và đoán hai dòng output trước khi chạy.</strong> Hầu hết mọi người đoán "Gâu gâu" và "loai(Cho)".</p>
+<pre><code>javac Trap.java
+java Trap</code></pre>
+<div class="expect"><pre><code>Gâu gâu
+<span class="hl">loai(DongVat)</span></code></pre></div>
+<p>Cùng một biến <code>a</code>, nhưng hai dòng theo hai luật khác nhau:</p>
+<ol class="flow">
+  <li><strong><code>a.keu()</code> là override.</strong> JVM quyết định lúc chạy, nhìn vào object thật là <code>Cho</code>, nên ra "Gâu gâu".</li>
+  <li><strong><code>loai(a)</code> là overload.</strong> Compiler quyết định lúc biên dịch. Compiler không chạy code nên không biết <code>a</code> sẽ trỏ tới <code>Cho</code>. Nó chỉ thấy chữ viết trong code: <code>DongVat a</code>. Nên nó chọn <code>loai(DongVat)</code>.</li>
+</ol>
+
+<p>Bằng chứng nằm trong bytecode. Lệnh <code>javap -c</code> (bài 1) cho thấy compiler đã ghi gì vào file <code>.class</code>:</p>
+<pre><code>javap -c Trap | grep invoke</code></pre>
+<div class="expect"><pre><code>12: <span class="hl">invokevirtual</span> #20   // Method Trap$DongVat.keu:()Ljava/lang/String;
+22: <span class="hl">invokestatic</span>  #32   // Method loai:(LTrap$DongVat;)Ljava/lang/String;</code></pre></div>
+<ul>
+  <li>Dòng 12: compiler ghi <code>DongVat.keu</code>, nhưng dùng lệnh <strong><code>invokevirtual</code></strong>. Lệnh này bảo JVM: "lúc chạy, nhìn object thật rồi tìm bản <code>keu()</code> phù hợp nhất". JVM tìm bắt đầu từ class <code>Cho</code>, thấy bản override, chạy nó.<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-6.html#jvms-6.5.invokevirtual">[JVMS §6.5 invokevirtual]</a></li>
+  <li>Dòng 22: phần trong ngoặc <code>(LTrap$DongVat;)</code> là kiểu tham số. Nghĩa là compiler đã <strong>đóng đinh</strong> bản <code>loai(DongVat)</code> vào bytecode. Lúc chạy, JVM chỉ việc gọi đúng bản đó, không chọn lại.</li>
+</ul>
+
+<div class="remember">
+<strong>Overload chọn theo chữ viết, override chọn theo object thật.</strong><br>
+Overload: compiler nhìn <em>kiểu khai báo</em> của đối số, quyết định một lần, ghi cứng vào bytecode.<br>
+Override: JVM nhìn <em>kiểu thật</em> của object mà ta gọi method trên đó, quyết định mỗi lần gọi.
+</div>
+
+<h2>6 · Bẫy ngoài đời: <code>equals(Diem o)</code></h2>
+<p>Đây là lỗi có thật trong code production, và nó dùng đúng cái bẫy ở mục 5. Ở bài 3 bạn đã học: muốn hai object "bằng nhau theo nội dung" thì phải override <code>equals(Object o)</code>. <code>EqualsTrap.java</code> viết nhầm tham số thành <code>Diem</code>:</p>
+<pre><code>static class Diem {
+    final int x, y;
+    // Nhầm: tham số là Diem chứ không phải Object
+    public boolean equals(Diem o) { return x == o.x &amp;&amp; y == o.y; }
+    @Override public int hashCode() { return 31 * x + y; }
+}
+
+Diem a = new Diem(1, 2), b = new Diem(1, 2);
+Object bAnDi = b;
+a.equals(b)            // ?
+a.equals(bAnDi)        // ?
+set.add(a); set.contains(b)   // ?</code></pre>
+<pre><code>javac EqualsTrap.java
+java EqualsTrap</code></pre>
+<div class="expect"><pre><code>a.equals(b)     = true
+a.equals(bAnDi) = <span class="hl">false</span>
+set.contains(b) = <span class="hl">false</span></code></pre></div>
+<p>Cùng một object <code>b</code>, mà kết quả lúc <code>true</code> lúc <code>false</code>. Từng bước:</p>
+<ol class="flow">
+  <li><code>equals(Diem o)</code> có tham số khác <code>equals(Object o)</code> của class <code>Object</code>. Khác tham số thì đó là <strong>overload</strong>, không phải override. Bây giờ class <code>Diem</code> có <em>hai</em> method <code>equals</code>: bản tự viết, và bản thừa hưởng từ <code>Object</code> (so sánh bằng <code>==</code>, bài 3).</li>
+  <li><code>a.equals(b)</code>: <code>b</code> khai báo là <code>Diem</code>, nên compiler chọn bản <code>equals(Diem)</code> → <code>true</code>.</li>
+  <li><code>a.equals(bAnDi)</code>: <code>bAnDi</code> khai báo là <code>Object</code>, nên compiler chọn bản <code>equals(Object)</code>. <code>Diem</code> không override bản này, nên chạy bản của <code>Object</code>: so sánh địa chỉ → <code>false</code>.</li>
+  <li><code>HashSet</code> được viết từ trước, cho mọi loại object, nên bên trong nó luôn gọi <code>equals(Object)</code>. Nó không hề biết có <code>equals(Diem)</code> → <code>false</code>. Bạn thêm điểm (1,2) vào set rồi hỏi lại thì set bảo "không có".</li>
+</ol>
+<p>Chữ <code>@Override</code> bắt lỗi này ngay lúc biên dịch. <code>loi/EqualsOverride.java</code> viết y như trên nhưng có gắn <code>@Override</code>:</p>
+<pre><code>javac loi/EqualsOverride.java</code></pre>
+<div class="expect"><pre><code>loi/EqualsOverride.java:3: error: <span class="hl">method does not override or implement a method from a supertype</span></code></pre></div>
+<div class="remember"><strong>Luôn gắn <code>@Override</code></strong> khi định override. Gõ sai tham số, sai tên (<code>hashcode</code> thay vì <code>hashCode</code>), hoặc cha đổi tên method: compiler báo ngay, thay vì để bug lặng lẽ chạy trên production. Bản <code>equals</code> đúng luôn nhận <code>Object</code>.</div>
+
+<h2>7 · Những method không override được, và chuyện của Spring</h2>
+<p>Override chỉ áp dụng cho method <strong>thường</strong> (method của object). Các loại sau thì không:</p>
+<ul>
+  <li><strong><code>final</code></strong>: bị cấm override (học kỹ ở bài 16).</li>
+  <li><strong><code>private</code></strong>: class con không nhìn thấy, nên viết method trùng tên ở con chỉ là một method mới hoàn toàn.</li>
+  <li><strong>Constructor</strong>: không được kế thừa, nên cũng không override được.</li>
+  <li><strong><code>static</code></strong>: con viết method static trùng chữ ký thì gọi là <strong>che</strong> (hiding), không phải override.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.4.8.2">[JLS §8.4.8.2]</a></li>
+</ul>
+<p>Xem trường hợp <code>static</code> trong <code>StaticHide.java</code>:</p>
+<pre><code>static class Cha { static String ten() { return "Cha"; }  String chao() { return "Cha"; } }
+static class Con extends Cha { static String ten() { return "Con"; }  @Override String chao() { return "Con"; } }
+
+Cha x = new Con();
+x.chao()   // method thường
+x.ten()    // method static</code></pre>
+<pre><code>javac StaticHide.java
+java StaticHide</code></pre>
+<div class="expect"><pre><code>x.chao() = Con
+x.ten()  = <span class="hl">Cha</span></code></pre></div>
+<p>Method static không gắn với object nào (bài 6: không có <code>this</code>), nên chẳng có "object thật" để JVM nhìn vào. Compiler chọn theo kiểu khai báo <code>Cha</code>, giống như overload. (Đó cũng là lý do nên gọi static bằng tên class, <code>Cha.ten()</code>, chứ đừng gọi qua biến.)</p>
+
+<p><strong>Liên hệ Spring (xem trước, học kỹ ở bài 17).</strong> Khi bean không có interface, Spring dùng CGLIB tạo một <em>class con</em> của class bạn. Class con đó <strong>override</strong> từng method để chèn thêm việc mở/đóng transaction. Vậy method nào không override được thì proxy không chặn được: <code>@Transactional</code> trên method <code>final</code>, <code>private</code> hay <code>static</code> sẽ <strong>lặng lẽ không có tác dụng</strong>, không báo lỗi. Tài liệu Spring ghi: <em>"With CGLIB, final methods cannot be advised, as they cannot be overridden in runtime-generated subclasses."</em><a class="cite" href="https://docs.spring.io/spring-framework/reference/core/aop/proxying.html">[Spring: Proxying Mechanisms]</a></p>
+
+<h2>8 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q17"></div>
+<script type="application/json" id="q17">[
+ {"q":"<code>DongVat a = new Cho();</code> rồi gọi <code>a.keu()</code>. Class <code>Cho</code> override <code>keu()</code>. Bản nào chạy?",
+  "options":["Bản keu() của DongVat","Lỗi biên dịch vì sai kiểu","Bản keu() của class Cho","Tuỳ JIT đã biên dịch chưa"],
+  "answer":2,
+  "why":"Override do JVM chọn lúc chạy, theo object thật. Object thật là <code>Cho</code>, nên chạy bản của <code>Cho</code>. Kiểu khai báo <code>DongVat</code> chỉ quyết định bạn <em>được phép</em> gọi method nào."},
+ {"q":"Có hai method <code>loai(DongVat d)</code> và <code>loai(Cho c)</code>. Với <code>DongVat a = new Cho();</code>, lời gọi <code>loai(a)</code> chạy bản nào?",
+  "options":["loai(DongVat), vì kiểu khai báo","loai(Cho), vì object thật là Cho","Lỗi biên dịch: lời gọi mơ hồ","Lỗi chạy: ClassCastException"],
+  "answer":0,
+  "why":"Overload do compiler chọn lúc biên dịch. Compiler chỉ thấy chữ <code>DongVat a</code>, nên chọn <code>loai(DongVat)</code> và ghi cứng <code>(LTrap$DongVat;)</code> vào bytecode."},
+ {"q":"<code>Diem</code> có <code>equals(Diem o)</code> (không có <code>@Override</code>) và <code>hashCode</code> đúng. Thêm điểm (1,2) vào <code>HashSet</code>, rồi <code>contains(new Diem(1,2))</code> trả về gì?",
+  "options":["true, vì equals(Diem) được dùng","Lỗi biên dịch vì thiếu @Override","true, vì hai hashCode bằng nhau","false, vì HashSet gọi equals(Object)"],
+  "answer":3,
+  "why":"<code>equals(Diem)</code> là overload, không phải override. HashSet luôn gọi <code>equals(Object)</code>, và bản đó vẫn là của <code>Object</code> (so sánh <code>==</code>). Hai object khác nhau nên ra <code>false</code>. Thiếu <code>@Override</code> không gây lỗi, chỉ làm mất cơ hội bắt lỗi."},
+ {"q":"Một class có <code>int tinh(int a)</code> và <code>double tinh(int a)</code>. Chuyện gì xảy ra?",
+  "options":["Chạy được, gọi bản trả về int","Lỗi biên dịch: tinh(int) đã có","Chạy được, gọi bản trả về double","Lỗi lúc chạy khi gọi tinh(5)"],
+  "answer":1,
+  "why":"Kiểu trả về không thuộc chữ ký method. Hai method có cùng chữ ký <code>tinh(int)</code>, nên compiler báo <code>method tinh(int) is already defined</code>."},
+ {"q":"<code>Cha</code> và <code>Con</code> đều có <code>static String ten()</code>. Với <code>Cha x = new Con();</code>, <code>x.ten()</code> trả về gì?",
+  "options":["\"Con\", vì object thật là Con","Lỗi biên dịch vì trùng tên method","\"Cha\", vì static theo kiểu khai báo","Lỗi chạy vì static gọi qua biến"],
+  "answer":2,
+  "why":"Method static không override được, chỉ bị <em>che</em> (hiding). Không có object nào để JVM nhìn, nên compiler chọn theo kiểu khai báo <code>Cha</code>. Nên viết <code>Cha.ten()</code> cho rõ."}
+]</script>
+
+<h2>9 · Thử thách: đoán compiler chọn bản nào</h2>
+<div class="lab">
+<p><code>Challenge.java</code> có ba bản overload. <strong>Viết ra giấy 5 dòng output trước khi chạy.</strong></p>
+<pre><code>static String in(Object o)  { return "Object"; }
+static String in(String s)  { return "String"; }
+static String in(long n)    { return "long"; }
+
+Object chu = "xin chào";
+System.out.println("1: " + in(5));
+System.out.println("2: " + in(null));
+System.out.println("3: " + in(chu));
+System.out.println("4: " + in('a'));
+System.out.println("5: " + in(Integer.valueOf(5)));</code></pre>
+<p>Gợi ý: compiler chọn theo 3 vòng, dừng ở vòng đầu tiên tìm được bản khớp:<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.12.2">[JLS §15.12.2]</a></p>
+<ol>
+  <li><strong>Vòng 1:</strong> khớp <em>không cần</em> boxing/unboxing (đổi qua lại giữa <code>int</code> và <code>Integer</code>). Được phép nới rộng số (<code>int → long</code>) và đi từ class con lên class cha (<code>String → Object</code>).</li>
+  <li><strong>Vòng 2:</strong> cho phép boxing/unboxing.</li>
+  <li><strong>Vòng 3:</strong> cho phép varargs (<code>...</code>).</li>
+</ol>
+<p>Nếu một vòng có nhiều bản khớp, compiler chọn bản <strong>cụ thể nhất</strong> (bản có tham số "hẹp" hơn, ví dụ <code>String</code> hẹp hơn <code>Object</code>).</p>
+<details><summary>Xem đáp án</summary>
+<pre><code>javac Challenge.java
+java Challenge</code></pre>
+<div class="expect"><pre><code>1: long
+2: String
+3: Object
+4: long
+5: Object</code></pre></div>
+<ol>
+  <li><code>in(5)</code>: <code>5</code> là <code>int</code>, không có <code>in(int)</code>. Vòng 1 cho nới <code>int → long</code> → <strong>long</strong>.</li>
+  <li><code>in(null)</code>: <code>null</code> khớp cả <code>String</code> lẫn <code>Object</code>. <code>String</code> cụ thể hơn → <strong>String</strong>.</li>
+  <li><code>in(chu)</code>: <code>chu</code> <em>khai báo</em> là <code>Object</code>, dù bên trong là chuỗi. Chính là cái bẫy ở mục 5 → <strong>Object</strong>.</li>
+  <li><code>in('a')</code>: <code>char</code> nới rộng được thành <code>long</code> ở vòng 1 → <strong>long</strong>. (Không ra <code>String</code>, vì <code>char</code> không phải chuỗi.)</li>
+  <li><code>in(Integer.valueOf(5))</code>: muốn vào <code>in(long)</code> phải <em>unbox</em>, tức là vòng 2. Nhưng vòng 1 đã khớp <code>Integer → Object</code> rồi → <strong>Object</strong>.</li>
+</ol>
+<p><strong>Thêm một bước:</strong> nếu có cả <code>in(String)</code> và <code>in(Integer)</code> thì <code>in(null)</code> ra sao? Hai kiểu này không kiểu nào "hẹp" hơn kiểu nào. Thử <code>javac loi/Ambiguous.java</code>:</p>
+<div class="expect"><pre><code>loi/Ambiguous.java:4: error: <span class="hl">reference to in is ambiguous</span>
+  both method in(String) in Ambiguous and method in(Integer) in Ambiguous match</code></pre></div>
+<p>Sửa bằng cách ép kiểu cho rõ: <code>in((String) null)</code>.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: JVM tìm bản override nhanh thế nào? (HotSpot)</summary>
+<p>Spec chỉ nói <code>invokevirtual</code> phải tìm bản phù hợp, bắt đầu từ class của object rồi đi lên các class cha.<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-5.html#jvms-5.4.6">[JVMS §5.4.6]</a> Spec không nói làm cách nào. HotSpot (JVM bạn đang dùng) làm thế này:</p>
+<ul>
+  <li><strong>vtable</strong>: mỗi class có một bảng các method có thể override, lưu trong Metaspace (bài 2). Mỗi method có vị trí cố định trong bảng, và class con ghi bản override của mình vào đúng vị trí đó. Gọi method chỉ tốn một lần tra bảng, không phải lần lượt dò từng class cha.</li>
+  <li><strong>JIT khử ảo</strong> (devirtualization, sẽ gặp JIT ở bài 8): nếu JIT thấy lúc đó chỉ có một class cài đặt method (dựa vào phân tích cây kế thừa, gọi là CHA), hoặc chỗ gọi luôn gặp cùng một class, nó sẽ <em>inline</em> thẳng bản đó và bỏ luôn bước tra bảng. Nếu sau đó có class mới được nạp làm sai giả định này, JIT bỏ code đã biên dịch (deoptimize) rồi biên dịch lại.</li>
+</ul>
+<p>Hệ quả thực tế: thêm <code>final</code> chỉ để "chạy nhanh hơn" gần như không có tác dụng, vì JIT đã tự làm việc đó. Dùng <code>final</code> khi bạn muốn <em>cấm</em> override, vì lý do thiết kế (xem bài 16).</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/java/IandI/override.html">Oracle Java Tutorial: Overriding and Hiding Methods</a>. Ngắn, có bảng so sánh override và hiding giống mục 7. Muốn hiểu sâu bẫy <code>equals</code>: <em>Effective Java</em>, Item 10 "Obey the general contract when overriding equals" và Item 40 "Consistently use the Override annotation". Item 52 "Use overloading judiciously" dùng đúng cái bẫy ở mục 5.</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "Method trong interface có được tính là override không?", "Field có override được không?", "Vì sao <code>List.remove(1)</code> và <code>remove(Integer.valueOf(1))</code> khác nhau?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0006-this-super.html">← Bài 6: this và super</a><a href="0008-jit-warm-up.html">Bài 8: JIT và warm-up →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

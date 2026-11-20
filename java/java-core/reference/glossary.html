@@ -9,6 +9,7 @@
 <body>
 <h1>Glossary</h1>
 <p class="subtitle">Thuật ngữ Java core dùng thống nhất trong mọi bài. Thêm dần theo từng bài.</p>
+<p>Thứ tự học và những gì còn phải học: <a href="lo-trinh.html">Lộ trình</a>.</p>
 
 <table>
 <tr><th>Thuật ngữ</th><th>Nghĩa</th><th>Bài</th></tr>
@@ -30,6 +31,7 @@
 <tr><td><strong>stack (thread stack)</strong></td><td>Vùng nhớ riêng của mỗi thread, chứa các frame. Kích thước cố định (mặc định 1 MB, <code>-Xss</code>). Đầy → <code>StackOverflowError</code>.</td><td><a href="../lessons/0002-stack-heap-pass-by-value.html">2</a></td></tr>
 <tr><td><strong>frame</strong></td><td>Sinh ra mỗi lần gọi method: local variable slots + operand stack. Bị bỏ khi method return. Kích thước do <code>javac</code> tính sẵn (<code>stack=, locals=</code>).</td><td>2</td></tr>
 <tr><td><strong>heap</strong></td><td>Vùng nhớ dùng chung giữa các thread, chứa mọi object và mảng (<code>new</code>). GC dọn object không còn được tham chiếu. Đầy → <code>OutOfMemoryError</code>.</td><td>2</td></tr>
+<tr><td><strong>Metaspace</strong></td><td>Vùng native memory (ngoài heap) chứa thông tin class: tên, field, method, bytecode. Thay PermGen từ Java 8. Mặc định không giới hạn; đặt <code>-XX:MaxMetaspaceSize</code>. Đầy → <code>OutOfMemoryError: Metaspace</code> (quá nhiều class: proxy, CGLIB, ClassLoader bị giữ).</td><td><a href="../lessons/0002-stack-heap-pass-by-value.html">2</a></td></tr>
 <tr><td><strong>reference (tham chiếu)</strong></td><td>Giá trị trỏ tới một object trên heap. Slot và field chỉ chứa primitive hoặc reference, không bao giờ chứa nguyên object.</td><td>2</td></tr>
 <tr><td><strong>pass-by-value</strong></td><td>Cách Java <em>luôn</em> truyền tham số: sao chép giá trị (primitive hoặc reference) sang frame mới. Method sửa được object, nhưng không đổi được biến của caller.</td><td>2</td></tr>
 <tr><td><strong><code>==</code></strong></td><td>So sánh hai giá trị trong slot. Với object, đó là so <em>tham chiếu</em> ("cùng một object?"). Bytecode: <code>if_acmpne</code> (ref), <code>if_icmpne</code> (int).</td><td><a href="../lessons/0003-equals-hashcode.html">3</a></td></tr>
@@ -44,62 +46,160 @@
 <tr><td><strong><code>intern()</code></strong></td><td>Trả về bản String trên kệ có cùng nội dung (chưa có thì đặt lên kệ).</td><td>4</td></tr>
 <tr><td><strong>immutable (bất biến)</strong></td><td>Tạo xong thì không sửa được. String là immutable: <code>toUpperCase()</code>, <code>trim()</code>... đều trả về String <em>mới</em>.</td><td>4</td></tr>
 <tr><td><strong>Integer cache</strong></td><td>"Kệ chung" cho <code>Integer</code> từ -128 đến 127. Ngoài khoảng này, mỗi lần là object mới, nên <code>==</code> ra false.</td><td>4</td></tr>
+<tr><td><strong><code>StringBuilder</code></strong></td><td>"Bảng trắng" sửa được: <code>append</code> viết vào cùng object (mảng tự nới, 16 → 34 → 70…). Dùng khi ghép chuỗi trong vòng lặp; <code>s += x</code> trong vòng lặp chậm theo bình phương. Không an toàn khi nhiều thread cùng viết.</td><td><a href="../lessons/0004-string-pool.html">4</a></td></tr>
+<tr><td><strong><code>StringBuffer</code></strong></td><td>Giống <code>StringBuilder</code> nhưng mọi method <code>synchronized</code>: an toàn đa luồng, chậm hơn. Có từ Java 1.0; code mới hầu như luôn dùng <code>StringBuilder</code>.</td><td>4</td></tr>
 <tr><td><strong>khởi tạo class</strong> (class initialization)</td><td>Chạy khối <code>static</code> và gán giá trị biến <code>static</code>. Xảy ra <em>một lần</em>, vào lần đầu class được dùng (<code>new</code>, gọi method static, đọc/gán biến static không phải hằng số, class con được khởi tạo).</td><td><a href="../lessons/0005-static-chay-khi-nao.html">5</a></td></tr>
 <tr><td><strong><code>&lt;clinit&gt;</code></strong></td><td>Method ẩn do <code>javac</code> tạo ra, gom mọi khối static và lệnh gán static. <code>javap</code> hiện thành <code>static {};</code>.</td><td>5</td></tr>
 <tr><td><strong>compile-time constant</strong></td><td><code>static final</code> với giá trị viết sẵn (số, chuỗi). <code>javac</code> chép thẳng giá trị vào chỗ dùng, nên đọc nó không kích hoạt khởi tạo class.</td><td>5</td></tr>
 <tr><td><strong><code>ExceptionInInitializerError</code></strong></td><td>Lỗi ném ra ở <em>lần đầu</em> khi khối static bị lỗi. Lỗi gốc nằm trong <code>getCause()</code>.</td><td>5</td></tr>
 <tr><td><strong><code>NoClassDefFoundError: Could not initialize class X</code></strong></td><td>Lỗi ở các lần <em>sau</em>: class X đã bị đánh dấu hỏng. File không hề thiếu. Hãy tìm <code>ExceptionInInitializerError</code> đầu tiên trong log.</td><td>5</td></tr>
-<tr><td><strong>warm-up</strong> (khởi động máy)</td><td>Giai đoạn đầu sau khi JVM khởi động: code còn chạy thông dịch nên chậm, rồi nhanh dần khi JIT biên dịch code "nóng". Gây latency cao ngay sau deploy.</td><td><a href="../lessons/0006-jit-warm-up.html">6</a></td></tr>
-<tr><td><strong>tiered compilation</strong></td><td>Biên dịch phân tầng (mặc định): thông dịch → C1 (biên dịch nhanh, tầng 3) → C2 (tối ưu mạnh, tầng 4).</td><td>6</td></tr>
-<tr><td><strong>C1 / C2</strong></td><td>Hai trình JIT của HotSpot. C1 dịch nhanh, tối ưu vừa phải. C2 dịch lâu hơn nhưng cho mã máy nhanh nhất.</td><td>6</td></tr>
-<tr><td><strong>OSR</strong> (On-Stack Replacement)</td><td>JIT biên dịch và thay code <em>ngay giữa một vòng lặp đang chạy</em>. Hiện bằng dấu <code>%</code> trong <code>-XX:+PrintCompilation</code>.</td><td>6</td></tr>
-<tr><td><strong>JMH</strong></td><td>Công cụ đo hiệu năng chính thức của OpenJDK. Tự lo warm-up và chống JIT bỏ qua phép tính.</td><td>6</td></tr>
-<tr><td><strong>GC</strong> (Garbage Collector)</td><td>Trình dọn rác của JVM: tự giải phóng object không còn đi tới được. Mặc định Java 21 là <strong>G1</strong>.</td><td><a href="../lessons/0007-gc-don-rac.html">7</a></td></tr>
-<tr><td><strong>GC root</strong></td><td>Điểm xuất phát khi GC lần dấu: biến trong các method đang chạy, biến <code>static</code>... Object không đi tới được từ root nào = rác.</td><td>7</td></tr>
-<tr><td><strong>memory leak</strong> (Java)</td><td>Vô tình vẫn giữ tham chiếu tới object không dùng nữa (hay gặp: <code>List</code>/<code>Map</code> static chỉ thêm không xoá). GC không dọn được → <code>OutOfMemoryError</code>.</td><td>7</td></tr>
-<tr><td><strong><code>OutOfMemoryError: Java heap space</code></strong></td><td>Heap đầy, GC dọn xong vẫn không đủ chỗ cho object mới.</td><td>7</td></tr>
-<tr><td><strong>heap dump</strong> (<code>.hprof</code>)</td><td>Ảnh chụp toàn bộ heap. Phân tích bằng Eclipse MAT / VisualVM để biết ai đang giữ object.</td><td>7</td></tr>
-<tr><td><strong>Young / Old generation</strong></td><td>Khu chứa object mới (dọn thường xuyên, nhanh) và khu chứa object sống lâu. <code>Pause Full</code> = dọn toàn bộ heap, chậm nhất.</td><td>7</td></tr>
-<tr><td><strong>Big-O</strong></td><td>Cách mô tả thời gian chạy tăng thế nào khi dữ liệu lớn lên. <strong>O(1)</strong>: không phụ thuộc số phần tử. <strong>O(n)</strong>: tỷ lệ với số phần tử.</td><td><a href="../lessons/0008-arraylist-ben-trong.html">8</a></td></tr>
-<tr><td><strong>capacity</strong> (dung lượng)</td><td>Độ dài mảng bên trong <code>ArrayList</code> (≥ <code>size</code>). Mặc định 10 ở lần add đầu; đầy thì giãn ~1,5 lần (10 → 15 → 22 → 33...).</td><td>8</td></tr>
-<tr><td><strong>amortized O(1)</strong></td><td>"Nhanh tính trung bình": thỉnh thoảng một lần tốn công (giãn mảng), nhưng chia đều cho mọi lần thì vẫn là O(1). Ví dụ: <code>ArrayList.add</code>.</td><td>8</td></tr>
-<tr><td><strong><code>ArrayDeque</code></strong></td><td>Hàng đợi/stack dựa trên mảng vòng. Thêm/lấy ở cả hai đầu đều O(1). Dùng thay <code>LinkedList</code> và thay <code>ArrayList.remove(0)</code>.</td><td>8</td></tr>
-<tr><td><strong>load factor</strong></td><td>Tỷ lệ đầy cho phép trước khi HashMap giãn. Mặc định 0.75: 16 ngăn chứa tối đa 12 phần tử, phần tử thứ 13 làm map nhân đôi lên 32 ngăn.</td><td><a href="../lessons/0009-hashmap-ben-trong.html">9</a></td></tr>
-<tr><td><strong>resize</strong> (HashMap)</td><td>Nhân đôi số ngăn và tính lại ngăn cho từng phần tử. Tránh bằng <code>HashMap.newHashMap(n)</code> khi biết trước số phần tử.</td><td>9</td></tr>
-<tr><td><strong>chọn ngăn</strong></td><td><code>(n - 1) &amp; (h ^ (h &gt;&gt;&gt; 16))</code>, với h = <code>hashCode()</code>. Với Integer nhỏ và 16 ngăn: ngăn = số % 16.</td><td>9</td></tr>
-<tr><td><strong>treeify</strong></td><td>Ngăn có ≥ 8 phần tử (và map ≥ 64 ngăn) thì chuỗi đổi thành cây đỏ đen, tìm trong ngăn còn O(log n). Từ Java 8.</td><td>9</td></tr>
-<tr><td><strong><code>LinkedHashMap</code> / <code>TreeMap</code></strong></td><td><code>LinkedHashMap</code> giữ thứ tự thêm vào; <code>TreeMap</code> sắp theo key. <code>HashMap</code> <em>không</em> đảm bảo thứ tự, và thứ tự có thể đổi sau resize.</td><td>9</td></tr>
-<tr><td><strong>thread</strong> (luồng)</td><td>Một dòng chạy code. Nhiều thread chạy song song, dùng chung heap (và biến static). Spring/Tomcat: mỗi request một thread.</td><td><a href="../lessons/0010-race-condition.html">10</a></td></tr>
-<tr><td><strong>race condition</strong></td><td>Nhiều thread cùng đọc–sửa–ghi dữ liệu dùng chung; kết quả phụ thuộc thứ tự chen ngang → mất dữ liệu, không báo lỗi.</td><td>10</td></tr>
-<tr><td><strong>atomic</strong> (nguyên tử)</td><td>Thao tác không thể bị chia cắt / chen ngang. <code>count++</code> <em>không</em> atomic (getstatic → iadd → putstatic).</td><td>10</td></tr>
-<tr><td><strong><code>synchronized</code></strong></td><td>Khoá: mỗi lúc chỉ một thread được vào khối/method; đồng thời đảm bảo thread sau nhìn thấy thay đổi của thread trước.</td><td>10</td></tr>
-<tr><td><strong><code>AtomicInteger</code> / <code>AtomicLong</code></strong></td><td>Biến số với thao tác atomic (<code>incrementAndGet</code>...). Lựa chọn tốt nhất cho biến đếm dùng chung.</td><td>10</td></tr>
-<tr><td><strong><code>ConcurrentHashMap</code></strong></td><td>Map thread-safe, dùng thay <code>HashMap</code> khi nhiều thread cùng đọc/ghi.</td><td>10</td></tr>
-<tr><td><strong>thread-safe</strong></td><td>Dùng đúng khi nhiều thread truy cập cùng lúc mà không cần khoá thêm. <code>HashMap</code>, <code>ArrayList</code> <em>không</em> thread-safe.</td><td>10</td></tr>
-<tr><td><strong>deadlock</strong> (khoá chết)</td><td>Các thread chờ nhau vòng tròn: mỗi thread giữ một khoá và chờ khoá thread khác đang giữ. Chương trình đứng im, không lỗi, CPU thấp.</td><td><a href="../lessons/0011-deadlock-thread-dump.html">11</a></td></tr>
-<tr><td><strong>thread dump</strong></td><td>Ảnh chụp tức thời mọi thread: tên, trạng thái, dòng code đang chạy, khoá đang giữ (<code>locked</code>) và đang chờ (<code>waiting to lock</code>).</td><td>11</td></tr>
-<tr><td><strong>PID</strong></td><td>Mã số tiến trình do hệ điều hành cấp. Lấy bằng <code>jps</code>.</td><td>11</td></tr>
-<tr><td><strong>Thread state</strong></td><td><code>RUNNABLE</code> (đang chạy) · <code>BLOCKED</code> (chờ vào <code>synchronized</code>) · <code>WAITING</code> (chờ không hạn) · <code>TIMED_WAITING</code> (chờ có hạn, vd. <code>sleep</code>).</td><td>11</td></tr>
-<tr><td><strong>lock ordering</strong></td><td>Quy tắc chống deadlock: mọi thread lấy các khoá theo <em>cùng một thứ tự</em>.</td><td>11</td></tr>
-<tr><td><strong>reflection</strong></td><td>Code đọc/dùng thông tin về class, method, field, annotation <em>lúc chạy</em>: <code>getMethod</code>, <code>isAnnotationPresent</code>, <code>invoke</code>. Nền móng của Spring.</td><td><a href="../lessons/0012-proxy-va-reflection.html">12</a></td></tr>
-<tr><td><strong>annotation</strong></td><td>Nhãn dán (metadata) lên class/method/field. Tự nó không làm gì; phải có code khác đọc nó. Muốn đọc lúc chạy thì cần <code>@Retention(RUNTIME)</code> (mặc định là <code>CLASS</code>).</td><td>12</td></tr>
-<tr><td><strong>proxy</strong></td><td>Object "đứng giữa", cùng interface với object thật; mọi lời gọi đi qua nó trước để làm thêm việc (transaction, log...) rồi mới tới object thật.</td><td>12</td></tr>
-<tr><td><strong>dynamic proxy</strong></td><td>Proxy có class được JVM sinh ra lúc chạy: <code>Proxy.newProxyInstance</code> + <code>InvocationHandler</code> (cần interface). Spring còn dùng CGLIB (class con).</td><td>12</td></tr>
-<tr><td><strong>self-invocation</strong></td><td>Method gọi method khác trong <em>cùng</em> object qua <code>this</code> → không đi qua proxy → <code>@Transactional</code>/<code>@Async</code>/<code>@Cacheable</code> bị bỏ qua.</td><td>12</td></tr>
-<tr><td><strong>visibility</strong> (nhìn thấy)</td><td>Thread này ghi, thread kia có thấy giá trị mới không. Không có happens-before thì không đảm bảo (JIT/cache CPU có thể giữ giá trị cũ mãi).</td><td><a href="../lessons/0013-volatile-jmm.html">13</a></td></tr>
-<tr><td><strong><code>volatile</code></strong></td><td>Ghi vào biến volatile happens-before mọi lần đọc sau → luôn thấy giá trị mới. <em>Không</em> làm <code>count++</code> thành atomic.</td><td>13</td></tr>
-<tr><td><strong>Java Memory Model (JMM)</strong></td><td>Bộ luật (JLS ch.17) quy định thread nào nhìn thấy giá trị nào, khi nào.</td><td>13</td></tr>
-<tr><td><strong>happens-before</strong></td><td>Nếu X happens-before Y thì mọi thứ ghi trước X đều thấy được ở Y. Nguồn: ghi/đọc volatile; unlock/lock cùng monitor; <code>start()</code>; <code>join()</code>.</td><td>13</td></tr>
-<tr><td><strong><code>AtomicBoolean</code></strong></td><td>Cờ boolean với <code>get</code>/<code>set</code> có hiệu ứng như volatile, cộng thêm thao tác atomic (<code>compareAndSet</code>).</td><td>13</td></tr>
-<tr><td><strong>thread pool</strong></td><td>Nhóm thread tạo sẵn, dùng lại cho nhiều việc; việc mới chờ trong hàng đợi. Nhanh hơn nhiều so với <code>new Thread</code> cho mỗi việc. Tomcat = thread pool (mặc định 200).</td><td><a href="../lessons/0014-thread-pool.html">14</a></td></tr>
-<tr><td><strong><code>ExecutorService</code></strong></td><td>Giao việc cho pool: <code>submit(...)</code>. Dùng xong <strong>phải</strong> <code>shutdown()</code> (hoặc <code>try (...)</code>, Java 19+), nếu không thread pool giữ JVM sống mãi.</td><td>14</td></tr>
-<tr><td><strong><code>Future</code></strong></td><td>"Phiếu hẹn" kết quả của việc đã submit. <code>get()</code> chờ tới khi có kết quả.</td><td>14</td></tr>
-<tr><td><strong>virtual thread</strong></td><td>Thread nhẹ do JVM quản lý (Java 21, JEP 444). Rẻ, tạo hàng triệu cái được; hợp với việc chủ yếu <em>chờ</em> I/O, không giúp việc tính toán nặng.</td><td>14</td></tr>
-<tr><td><strong><code>final</code> (biến/field)</strong></td><td>Không được gán lại. Với object: chỉ <em>tham chiếu</em> cố định, object vẫn sửa được (<code>final List</code> vẫn <code>add</code> được). <code>final</code> ≠ immutable.</td><td><a href="../lessons/0015-final.html">15</a></td></tr>
-<tr><td><strong><code>final</code> (method / class)</strong></td><td>Method: cấm override. Class: cấm kế thừa (vd. <code>String</code>). Proxy CGLIB không chặn được method/class final → <code>@Transactional</code> mất tác dụng.</td><td>15</td></tr>
-<tr><td><strong>effectively final</strong></td><td>Biến cục bộ không có chữ <code>final</code> nhưng không bao giờ bị gán lại. Lambda chỉ được dùng biến final hoặc effectively final.</td><td>15</td></tr>
-<tr><td><strong>defensive copy</strong></td><td>Chép ra bản riêng (vd. <code>List.copyOf</code>) khi nhận/trả object sửa được, để bên ngoài không sửa được trạng thái bên trong.</td><td>15</td></tr>
+<tr><td><strong>warm-up</strong> (khởi động máy)</td><td>Giai đoạn đầu sau khi JVM khởi động: code còn chạy thông dịch nên chậm, rồi nhanh dần khi JIT biên dịch code "nóng". Gây latency cao ngay sau deploy.</td><td><a href="../lessons/0008-jit-warm-up.html">8</a></td></tr>
+<tr><td><strong>tiered compilation</strong></td><td>Biên dịch phân tầng (mặc định): thông dịch → C1 (biên dịch nhanh, tầng 3) → C2 (tối ưu mạnh, tầng 4).</td><td>8</td></tr>
+<tr><td><strong>C1 / C2</strong></td><td>Hai trình JIT của HotSpot. C1 dịch nhanh, tối ưu vừa phải. C2 dịch lâu hơn nhưng cho mã máy nhanh nhất.</td><td>8</td></tr>
+<tr><td><strong>OSR</strong> (On-Stack Replacement)</td><td>JIT biên dịch và thay code <em>ngay giữa một vòng lặp đang chạy</em>. Hiện bằng dấu <code>%</code> trong <code>-XX:+PrintCompilation</code>.</td><td>8</td></tr>
+<tr><td><strong>JMH</strong></td><td>Công cụ đo hiệu năng chính thức của OpenJDK. Tự lo warm-up và chống JIT bỏ qua phép tính.</td><td>8</td></tr>
+<tr><td><strong>GC</strong> (Garbage Collector)</td><td>Trình dọn rác của JVM: tự giải phóng object không còn đi tới được. Mặc định Java 21 là <strong>G1</strong>.</td><td><a href="../lessons/0009-gc-don-rac.html">9</a></td></tr>
+<tr><td><strong>GC root</strong></td><td>Điểm xuất phát khi GC lần dấu: biến trong các method đang chạy, biến <code>static</code>... Object không đi tới được từ root nào = rác.</td><td>9</td></tr>
+<tr><td><strong>memory leak</strong> (Java)</td><td>Vô tình vẫn giữ tham chiếu tới object không dùng nữa (hay gặp: <code>List</code>/<code>Map</code> static chỉ thêm không xoá). GC không dọn được → <code>OutOfMemoryError</code>.</td><td>9</td></tr>
+<tr><td><strong><code>OutOfMemoryError: Java heap space</code></strong></td><td>Heap đầy, GC dọn xong vẫn không đủ chỗ cho object mới.</td><td>9</td></tr>
+<tr><td><strong>heap dump</strong> (<code>.hprof</code>)</td><td>Ảnh chụp toàn bộ heap. Phân tích bằng Eclipse MAT / VisualVM để biết ai đang giữ object.</td><td>9</td></tr>
+<tr><td><strong>Young / Old generation</strong></td><td>Khu chứa object mới (dọn thường xuyên, nhanh) và khu chứa object sống lâu. <code>Pause Full</code> = dọn toàn bộ heap, chậm nhất.</td><td>9</td></tr>
+<tr><td><strong>Big-O</strong></td><td>Cách mô tả thời gian chạy tăng thế nào khi dữ liệu lớn lên. <strong>O(1)</strong>: không phụ thuộc số phần tử. <strong>O(n)</strong>: tỷ lệ với số phần tử.</td><td><a href="../lessons/0010-arraylist-ben-trong.html">10</a></td></tr>
+<tr><td><strong>capacity</strong> (dung lượng)</td><td>Độ dài mảng bên trong <code>ArrayList</code> (≥ <code>size</code>). Mặc định 10 ở lần add đầu; đầy thì giãn ~1,5 lần (10 → 15 → 22 → 33...).</td><td>10</td></tr>
+<tr><td><strong>amortized O(1)</strong></td><td>"Nhanh tính trung bình": thỉnh thoảng một lần tốn công (giãn mảng), nhưng chia đều cho mọi lần thì vẫn là O(1). Ví dụ: <code>ArrayList.add</code>.</td><td>10</td></tr>
+<tr><td><strong><code>ArrayDeque</code></strong></td><td>Hàng đợi/stack dựa trên mảng vòng. Thêm/lấy ở cả hai đầu đều O(1). Dùng thay <code>LinkedList</code> và thay <code>ArrayList.remove(0)</code>.</td><td>10</td></tr>
+<tr><td><strong>load factor</strong></td><td>Tỷ lệ đầy cho phép trước khi HashMap giãn. Mặc định 0.75: 16 ngăn chứa tối đa 12 phần tử, phần tử thứ 13 làm map nhân đôi lên 32 ngăn.</td><td><a href="../lessons/0011-hashmap-ben-trong.html">11</a></td></tr>
+<tr><td><strong>resize</strong> (HashMap)</td><td>Nhân đôi số ngăn và tính lại ngăn cho từng phần tử. Tránh bằng <code>HashMap.newHashMap(n)</code> khi biết trước số phần tử.</td><td>11</td></tr>
+<tr><td><strong>chọn ngăn</strong></td><td><code>(n - 1) &amp; (h ^ (h &gt;&gt;&gt; 16))</code>, với h = <code>hashCode()</code>. Với Integer nhỏ và 16 ngăn: ngăn = số % 16.</td><td>11</td></tr>
+<tr><td><strong>treeify</strong></td><td>Ngăn có ≥ 8 phần tử (và map ≥ 64 ngăn) thì chuỗi đổi thành cây đỏ đen, tìm trong ngăn còn O(log n). Từ Java 8.</td><td>11</td></tr>
+<tr><td><strong><code>LinkedHashMap</code> / <code>TreeMap</code></strong></td><td><code>LinkedHashMap</code> giữ thứ tự thêm vào; <code>TreeMap</code> sắp theo key. <code>HashMap</code> <em>không</em> đảm bảo thứ tự, và thứ tự có thể đổi sau resize.</td><td>11</td></tr>
+<tr><td><strong>thread</strong> (luồng)</td><td>Một dòng chạy code. Nhiều thread chạy song song, dùng chung heap (và biến static). Spring/Tomcat: mỗi request một thread.</td><td><a href="../lessons/0012-race-condition.html">12</a></td></tr>
+<tr><td><strong>race condition</strong></td><td>Nhiều thread cùng đọc–sửa–ghi dữ liệu dùng chung; kết quả phụ thuộc thứ tự chen ngang → mất dữ liệu, không báo lỗi.</td><td>12</td></tr>
+<tr><td><strong>atomic</strong> (nguyên tử)</td><td>Thao tác không thể bị chia cắt / chen ngang. <code>count++</code> <em>không</em> atomic (getstatic → iadd → putstatic).</td><td>12</td></tr>
+<tr><td><strong><code>synchronized</code></strong></td><td>Khoá: mỗi lúc chỉ một thread được vào khối/method; đồng thời đảm bảo thread sau nhìn thấy thay đổi của thread trước.</td><td>12</td></tr>
+<tr><td><strong><code>AtomicInteger</code> / <code>AtomicLong</code></strong></td><td>Biến số với thao tác atomic (<code>incrementAndGet</code>...). Lựa chọn tốt nhất cho biến đếm dùng chung.</td><td>12</td></tr>
+<tr><td><strong><code>ConcurrentHashMap</code></strong></td><td>Map thread-safe, dùng thay <code>HashMap</code> khi nhiều thread cùng đọc/ghi.</td><td>12</td></tr>
+<tr><td><strong>thread-safe</strong></td><td>Dùng đúng khi nhiều thread truy cập cùng lúc mà không cần khoá thêm. <code>HashMap</code>, <code>ArrayList</code> <em>không</em> thread-safe.</td><td>12</td></tr>
+<tr><td><strong>deadlock</strong> (khoá chết)</td><td>Các thread chờ nhau vòng tròn: mỗi thread giữ một khoá và chờ khoá thread khác đang giữ. Chương trình đứng im, không lỗi, CPU thấp.</td><td><a href="../lessons/0013-deadlock-thread-dump.html">13</a></td></tr>
+<tr><td><strong>thread dump</strong></td><td>Ảnh chụp tức thời mọi thread: tên, trạng thái, dòng code đang chạy, khoá đang giữ (<code>locked</code>) và đang chờ (<code>waiting to lock</code>).</td><td>13</td></tr>
+<tr><td><strong>PID</strong></td><td>Mã số tiến trình do hệ điều hành cấp. Lấy bằng <code>jps</code>.</td><td>13</td></tr>
+<tr><td><strong>Thread state</strong></td><td><code>RUNNABLE</code> (đang chạy) · <code>BLOCKED</code> (chờ vào <code>synchronized</code>) · <code>WAITING</code> (chờ không hạn) · <code>TIMED_WAITING</code> (chờ có hạn, vd. <code>sleep</code>).</td><td>13</td></tr>
+<tr><td><strong>lock ordering</strong></td><td>Quy tắc chống deadlock: mọi thread lấy các khoá theo <em>cùng một thứ tự</em>.</td><td>13</td></tr>
+<tr><td><strong>reflection</strong></td><td>Code đọc/dùng thông tin về class, method, field, annotation <em>lúc chạy</em>: <code>getMethod</code>, <code>isAnnotationPresent</code>, <code>invoke</code>. Nền móng của Spring.</td><td><a href="../lessons/0017-proxy-va-reflection.html">14</a></td></tr>
+<tr><td><strong>annotation</strong></td><td>Nhãn dán (metadata) lên class/method/field. Tự nó không làm gì; phải có code khác đọc nó. Muốn đọc lúc chạy thì cần <code>@Retention(RUNTIME)</code> (mặc định là <code>CLASS</code>).</td><td>14</td></tr>
+<tr><td><strong>proxy</strong></td><td>Object "đứng giữa", cùng interface với object thật; mọi lời gọi đi qua nó trước để làm thêm việc (transaction, log...) rồi mới tới object thật.</td><td>14</td></tr>
+<tr><td><strong>dynamic proxy</strong></td><td>Proxy có class được JVM sinh ra lúc chạy: <code>Proxy.newProxyInstance</code> + <code>InvocationHandler</code> (cần interface). Spring còn dùng CGLIB (class con).</td><td>14</td></tr>
+<tr><td><strong>self-invocation</strong></td><td>Method gọi method khác trong <em>cùng</em> object qua <code>this</code> → không đi qua proxy → <code>@Transactional</code>/<code>@Async</code>/<code>@Cacheable</code> bị bỏ qua.</td><td>14</td></tr>
+<tr><td><strong>visibility</strong> (nhìn thấy)</td><td>Thread này ghi, thread kia có thấy giá trị mới không. Không có happens-before thì không đảm bảo (JIT/cache CPU có thể giữ giá trị cũ mãi).</td><td><a href="../lessons/0014-volatile-jmm.html">15</a></td></tr>
+<tr><td><strong><code>volatile</code></strong></td><td>Ghi vào biến volatile happens-before mọi lần đọc sau → luôn thấy giá trị mới. <em>Không</em> làm <code>count++</code> thành atomic.</td><td>15</td></tr>
+<tr><td><strong>Java Memory Model (JMM)</strong></td><td>Bộ luật (JLS ch.17) quy định thread nào nhìn thấy giá trị nào, khi nào.</td><td>15</td></tr>
+<tr><td><strong>happens-before</strong></td><td>Nếu X happens-before Y thì mọi thứ ghi trước X đều thấy được ở Y. Nguồn: ghi/đọc volatile; unlock/lock cùng monitor; <code>start()</code>; <code>join()</code>.</td><td>15</td></tr>
+<tr><td><strong><code>AtomicBoolean</code></strong></td><td>Cờ boolean với <code>get</code>/<code>set</code> có hiệu ứng như volatile, cộng thêm thao tác atomic (<code>compareAndSet</code>).</td><td>15</td></tr>
+<tr><td><strong>thread pool</strong></td><td>Nhóm thread tạo sẵn, dùng lại cho nhiều việc; việc mới chờ trong hàng đợi. Nhanh hơn nhiều so với <code>new Thread</code> cho mỗi việc. Tomcat = thread pool (mặc định 200).</td><td><a href="../lessons/0015-thread-pool.html">16</a></td></tr>
+<tr><td><strong><code>ExecutorService</code></strong></td><td>Giao việc cho pool: <code>submit(...)</code>. Dùng xong <strong>phải</strong> <code>shutdown()</code> (hoặc <code>try (...)</code>, Java 19+), nếu không thread pool giữ JVM sống mãi.</td><td>16</td></tr>
+<tr><td><strong><code>Future</code></strong></td><td>"Phiếu hẹn" kết quả của việc đã submit. <code>get()</code> chờ tới khi có kết quả.</td><td>16</td></tr>
+<tr><td><strong>virtual thread</strong></td><td>Thread nhẹ do JVM quản lý (Java 21, JEP 444). Rẻ, tạo hàng triệu cái được; hợp với việc chủ yếu <em>chờ</em> I/O, không giúp việc tính toán nặng.</td><td>16</td></tr>
+<tr><td><strong><code>final</code> (biến/field)</strong></td><td>Không được gán lại. Với object: chỉ <em>tham chiếu</em> cố định, object vẫn sửa được (<code>final List</code> vẫn <code>add</code> được). <code>final</code> ≠ immutable.</td><td><a href="../lessons/0016-final.html">17</a></td></tr>
+<tr><td><strong><code>final</code> (method / class)</strong></td><td>Method: cấm override. Class: cấm kế thừa (vd. <code>String</code>). Proxy CGLIB không chặn được method/class final → <code>@Transactional</code> mất tác dụng.</td><td>17</td></tr>
+<tr><td><strong>effectively final</strong></td><td>Biến cục bộ không có chữ <code>final</code> nhưng không bao giờ bị gán lại. Lambda chỉ được dùng biến final hoặc effectively final.</td><td>17</td></tr>
+<tr><td><strong>defensive copy</strong></td><td>Chép ra bản riêng (vd. <code>List.copyOf</code>) khi nhận/trả object sửa được, để bên ngoài không sửa được trạng thái bên trong.</td><td>17</td></tr>
+<tr><td><strong><code>this</code></strong></td><td>Tham chiếu tới object đang chạy method. JVM truyền ngầm vào slot 0 của mọi method không static và constructor (<code>args_size</code> = số tham số + 1). Không dùng được trong <code>static</code>.</td><td><a href="../lessons/0006-this-super.html">6</a></td></tr>
+<tr><td><strong>shadowing</strong> (che tên)</td><td>Tham số/biến cục bộ trùng tên field sẽ che field. <code>ten = ten</code> chỉ gán tham số cho chính nó; phải viết <code>this.ten = ten</code>.</td><td>6</td></tr>
+<tr><td><strong><code>this(...)</code> / <code>super(...)</code></strong></td><td>Gọi constructor khác cùng class / constructor của class cha. Phải là câu lệnh đầu tiên (Java 21; Java 25 nới lỏng, JEP 513).</td><td>6</td></tr>
+<tr><td><strong><code>super.method()</code></strong></td><td>Gọi bản method của class cha, bỏ qua bản override. Dùng để mở rộng thay vì thay thế.</td><td>6</td></tr>
+<tr><td><strong>overloading</strong> (nạp chồng)</td><td>Nhiều method cùng tên, <em>khác danh sách tham số</em>, trong cùng class. <strong>Compiler</strong> chọn bản nào lúc biên dịch, dựa vào <em>kiểu khai báo</em> của đối số. Chỉ khác kiểu trả về → lỗi biên dịch.</td><td><a href="../lessons/0007-overriding-overloading.html">7</a></td></tr>
+<tr><td><strong>overriding</strong> (ghi đè)</td><td>Class con viết lại method của cha với <em>cùng chữ ký</em>. <strong>JVM</strong> chọn bản nào lúc chạy, dựa vào <em>object thật</em> (<code>invokevirtual</code>). Gắn <code>@Override</code> để compiler bắt lỗi gõ sai.</td><td>7</td></tr>
+<tr><td><strong>chữ ký method</strong> (signature)</td><td>Tên method + danh sách kiểu tham số. Không gồm kiểu trả về, tên tham số, <code>throws</code>.</td><td>7</td></tr>
+<tr><td><strong>dynamic dispatch</strong></td><td>Cơ chế chọn bản override theo object thật lúc chạy. Là nền của đa hình (polymorphism) và của proxy CGLIB trong Spring.</td><td>7</td></tr>
+<tr><td><strong>method hiding</strong></td><td>Method <code>static</code> ở con trùng chữ ký với cha: không phải override, mà <em>che</em>. Bản được gọi phụ thuộc kiểu khai báo.</td><td>7</td></tr>
+<tr><td><strong>abstract class</strong></td><td>Class chưa hoàn chỉnh: có field, constructor, method làm sẵn, và method <code>abstract</code> (không thân) để con làm. Không <code>new</code> được. Chỉ <code>extends</code> được một class.</td><td><a href="../lessons/0018-interface-abstract-access.html">18</a></td></tr>
+<tr><td><strong>interface</strong></td><td>Lời hứa "làm được việc gì". Method tự động <code>public</code>; field tự động <code>public static final</code> (không có trạng thái của object). Một class <code>implements</code> được nhiều interface.</td><td>18</td></tr>
+<tr><td><strong>default method</strong></td><td>Method có thân trong interface (Java 8+), để thêm method mới mà không làm hỏng class cũ. Trùng default từ hai interface → phải override, gọi <code>A.super.m()</code>.</td><td>18</td></tr>
+<tr><td><strong>access modifier</strong></td><td><code>public</code> &gt; <code>protected</code> (cùng package + class con) &gt; package-private (không ghi gì, cùng package) &gt; <code>private</code> (cùng class). <code>private</code> theo class, không theo object.</td><td>18</td></tr>
+<tr><td><strong>generics</strong></td><td>"Dán nhãn" kiểu cho class/method (<code>List&lt;String&gt;</code>) để compiler bắt lỗi kiểu lúc biên dịch thay vì <code>ClassCastException</code> lúc chạy.</td><td><a href="../lessons/0020-generics.html">19</a></td></tr>
+<tr><td><strong>raw type</strong></td><td>Dùng class generic không có <code>&lt;...&gt;</code> (<code>List</code> trơn). Chỉ để tương thích code cũ; gây cảnh báo "unchecked". Không dùng trong code mới.</td><td>19</td></tr>
+<tr><td><strong>type erasure</strong></td><td>Compiler kiểm tra <code>&lt;T&gt;</code> rồi xoá nó: lúc chạy <code>List&lt;String&gt;</code> và <code>List&lt;Integer&gt;</code> cùng là <code>ArrayList</code>; compiler tự chèn <code>checkcast</code> chỗ lấy ra. Vì vậy không có <code>new T()</code>, <code>instanceof T</code>.</td><td>19</td></tr>
+<tr><td><strong>heap pollution</strong></td><td>Biến kiểu <code>List&lt;String&gt;</code> trỏ tới list chứa thứ không phải String (lọt qua raw type/reflection). Nổ <code>ClassCastException</code> ở chỗ <em>lấy ra</em>, xa chỗ gây lỗi.</td><td>19</td></tr>
+<tr><td><strong>invariant</strong> (bất biến)</td><td><code>List&lt;Integer&gt;</code> không phải <code>List&lt;Number&gt;</code>. Mảng thì covariant (<code>Number[] = Integer[]</code> được) nên phải kiểm tra lúc chạy: <code>ArrayStoreException</code>.</td><td>19</td></tr>
+<tr><td><strong>wildcard / PECS</strong></td><td><code>? extends T</code>: chỉ đọc ra (producer). <code>? super T</code>: chỉ ghi vào (consumer). Vừa đọc vừa ghi: <code>List&lt;T&gt;</code>. "Producer Extends, Consumer Super".</td><td>19</td></tr>
+<tr><td><strong>lambda</strong></td><td>Cài đặt ngắn cho method duy nhất của một functional interface: <code>(a, b) -&gt; ...</code>. Thân thành method <code>private static lambda$...</code>; chỗ tạo là <code>invokedynamic</code> + <code>LambdaMetafactory</code> (class dựng lúc chạy, không có file <code>.class</code>).</td><td><a href="../lessons/0021-lambda-stream.html">20</a></td></tr>
+<tr><td><strong>functional interface</strong></td><td>Interface có đúng một method abstract (<code>Predicate</code>, <code>Function</code>, <code>Supplier</code>, <code>Consumer</code>, <code>Comparator</code>, <code>Runnable</code>). <code>@FunctionalInterface</code> nhờ compiler kiểm tra.</td><td>20</td></tr>
+<tr><td><strong>method reference</strong></td><td><code>String::length</code>, <code>System.out::println</code>: cách viết gọn lambda chỉ gọi một method có sẵn.</td><td>20</td></tr>
+<tr><td><strong>lazy (stream)</strong></td><td><code>filter</code>/<code>map</code> (trung gian) chỉ lắp dây chuyền; chỉ chạy khi có thao tác cuối (<code>collect</code>, <code>findFirst</code>, <code>count</code>, <code>forEach</code>). Từng phần tử đi hết dây chuyền; dừng sớm; stream dùng một lần.</td><td>20</td></tr>
+<tr><td><strong>common pool</strong></td><td><code>ForkJoinPool.commonPool</code>: pool chung (số lõi − 1 thread) cho mọi parallel stream và <code>CompletableFuture</code> mặc định của cả JVM. Không dùng cho việc chờ I/O.</td><td>20</td></tr>
+<tr><td><strong>static nested class</strong></td><td>Class khai báo <code>static</code> bên trong class khác: độc lập, không giữ object ngoài. Tạo bằng <code>new Ngoai.Nested()</code>. Mặc định nên dùng (Builder, <code>HashMap.Node</code>).</td><td><a href="../lessons/0022-inner-vs-static-nested.html">21</a></td></tr>
+<tr><td><strong>inner class</strong></td><td>Class lồng <em>không</em> <code>static</code> (kể cả class ẩn danh): mỗi object gắn với một object ngoài qua field ẩn <code>this$0</code>; tạo bằng <code>ngoai.new Inner()</code>. Bị giữ lâu (list static, listener) thì kéo theo cả object ngoài → rò rỉ.</td><td>21</td></tr>
+<tr><td><strong><code>this$0</code></strong></td><td>Field ẩn compiler thêm vào inner class, trỏ tới object ngoài (xem bằng <code>javap -p</code>). Từ JDK 18 bị bỏ nếu inner class không dùng object ngoài, nhưng constructor vẫn đòi object ngoài.</td><td>21</td></tr>
+<tr><td><strong>checked exception</strong></td><td>Con của <code>Exception</code> nhưng không qua <code>RuntimeException</code> (<code>IOException</code>, <code>SQLException</code>). Compiler bắt phải <code>catch</code> hoặc <code>throws</code>. Spring mặc định <em>không</em> rollback với loại này.</td><td><a href="../lessons/0019-exception.html">22</a></td></tr>
+<tr><td><strong>unchecked exception</strong></td><td>Con của <code>RuntimeException</code> (NPE, <code>IllegalArgumentException</code>). Không bắt buộc xử lý. Spring mặc định rollback. <code>Error</code> (OOM, StackOverflow) cũng không bắt buộc và thường không nên bắt.</td><td>22</td></tr>
+<tr><td><strong>try-with-resources</strong></td><td><code>try (A a = ...; B b = ...) {...}</code>: tự đóng mọi <code>AutoCloseable</code> theo thứ tự ngược; lỗi khi đóng thành <em>suppressed</em>, không che lỗi gốc. Không bao giờ <code>return</code> trong <code>finally</code> (nuốt exception).</td><td>22</td></tr>
+<tr><td><strong>OmitStackTraceInFastThrow</strong></td><td>Tối ưu JIT: chỗ ném NPE/ArithmeticException… liên tục được thay bằng exception tạo sẵn, không message, không stack trace. Tắt bằng <code>-XX:-OmitStackTraceInFastThrow</code>; hoặc tìm log những lần đầu.</td><td>22</td></tr>
+<tr><td><strong>Comparable / Comparator</strong></td><td><code>compareTo</code> trong class (thứ tự tự nhiên) / <code>compare</code> bên ngoài (nhiều cách xếp). Trả âm/0/dương. Dùng <code>Integer.compare</code>, <code>Comparator.comparing(...).thenComparing(...)</code>; không trừ hai số (tràn).</td><td><a href="../lessons/0023-comparator-treemap-cme.html">23</a></td></tr>
+<tr><td><strong><code>TreeMap</code> / <code>TreeSet</code></strong></td><td>Cây đỏ–đen, key luôn sắp xếp, O(log n). <code>floorEntry</code>, <code>ceilingKey</code>, <code>subMap</code>. Coi <code>compare == 0</code> là trùng (không gọi equals) → có thể mất phần tử.</td><td>23</td></tr>
+<tr><td><strong><code>LinkedHashMap</code></strong></td><td>HashMap + chuỗi nối giữ thứ tự thêm vào; <code>accessOrder = true</code> + <code>removeEldestEntry</code> = LRU cache.</td><td>23</td></tr>
+<tr><td><strong>ConcurrentModificationException</strong></td><td>Sửa collection trong lúc duyệt bằng iterator/for-each (thường chỉ 1 thread). Iterator so <code>modCount</code> với <code>expectedModCount</code> (fail-fast, không đảm bảo). Dùng <code>removeIf</code> / <code>iterator.remove()</code>.</td><td>23</td></tr>
 </table>
+
+<h2>this / super</h2>
+<pre><code>this.ten = ten;            // field vs tham số trùng tên
+this(ten, gia, 1);         // constructor gọi constructor (dòng đầu tiên)
+super.moTa() + " VIP";     // gọi bản của cha rồi mở rộng
+super("Bình");             // gọi constructor cha (dòng đầu tiên)</code></pre>
+<ul>
+  <li><strong>Không gọi method override được trong constructor</strong>: constructor cha chạy trước khi field của con được gán → bản override của con thấy <code>null</code>/<code>0</code> (kể cả field <code>final</code>).</li>
+  <li>Không để lộ <code>this</code> ra ngoài khi constructor chưa xong (listener, list static, thread).</li>
+</ul>
+
+<h2>Overload vs Override</h2>
+<table>
+<tr><th></th><th>Overload</th><th>Override</th></tr>
+<tr><td>Khác nhau ở</td><td>danh sách tham số</td><td>không khác (cùng chữ ký)</td></tr>
+<tr><td>Ai chọn, khi nào</td><td>compiler, lúc biên dịch</td><td>JVM, lúc chạy</td></tr>
+<tr><td>Dựa vào</td><td>kiểu <em>khai báo</em> của đối số</td><td>kiểu <em>thật</em> của object</td></tr>
+<tr><td>static / private / final</td><td>overload thoải mái</td><td>không override được (static chỉ bị <em>che</em>)</td></tr>
+</table>
+<ul>
+  <li>Luật override: cùng chữ ký; kiểu trả về giống hoặc là con (covariant); quyền truy cập không được hẹp hơn; không ném thêm checked exception rộng hơn.</li>
+  <li>Thứ tự compiler chọn overload: (1) khớp không cần boxing (kể cả nới rộng <code>int→long</code>) → (2) có boxing/unboxing → (3) varargs. Nhiều bản khớp: chọn bản cụ thể nhất; hoà → lỗi "ambiguous".</li>
+  <li>Luôn gắn <code>@Override</code>: <code>equals(Diem)</code> thay vì <code>equals(Object)</code> là overload, HashSet không dùng tới.</li>
+</ul>
+
+<h2>Interface vs abstract class · Access modifier</h2>
+<table>
+<tr><th></th><th>Abstract class</th><th>Interface</th></tr>
+<tr><td>Ý nghĩa</td><td>"là một loại..."</td><td>"làm được..."</td></tr>
+<tr><td>Một class dùng được</td><td>một (<code>extends</code>)</td><td>nhiều (<code>implements</code>)</td></tr>
+<tr><td>Field của object, constructor</td><td>có</td><td>không (chỉ hằng <code>public static final</code>)</td></tr>
+<tr><td>Method</td><td>mọi mức truy cập</td><td>luôn <code>public</code>; có thể <code>default</code>/<code>static</code>/<code>private</code></td></tr>
+</table>
+<table>
+<tr><th>Mức</th><th>Class</th><th>Package</th><th>Con (package khác)</th><th>Mọi nơi</th></tr>
+<tr><td><code>public</code></td><td>✔</td><td>✔</td><td>✔</td><td>✔</td></tr>
+<tr><td><code>protected</code></td><td>✔</td><td>✔</td><td>✔</td><td>✘</td></tr>
+<tr><td>(không ghi)</td><td>✔</td><td>✔</td><td>✘</td><td>✘</td></tr>
+<tr><td><code>private</code></td><td>✔</td><td>✘</td><td>✘</td><td>✘</td></tr>
+</table>
+<ul><li>Mặc định: interface cho khả năng, abstract class khi cần chung trạng thái/bước làm sẵn (thường dùng cả hai: <code>List</code> + <code>AbstractList</code>).</li><li>Để mức truy cập hẹp nhất; field gần như luôn <code>private</code>.</li></ul>
+
+<h2>Generics</h2>
+<pre><code>static double tong(List&lt;? extends Number&gt; ds)          // đọc ra (producer)
+static void them(List&lt;? super Integer&gt; ds)             // ghi vào (consumer)
+static &lt;T&gt; void copy(List&lt;? super T&gt; dest, List&lt;? extends T&gt; src)   // Collections.copy
+new ParameterizedTypeReference&lt;List&lt;User&gt;&gt;() {}       // giữ được &lt;List&lt;User&gt;&gt; nhờ class con ẩn danh</code></pre>
+<ul>
+  <li>Erasure: lúc chạy không biết <code>T</code> → không <code>new T()</code>, <code>new T[]</code>, <code>instanceof List&lt;String&gt;</code>; không overload <code>f(List&lt;A&gt;)</code>/<code>f(List&lt;B&gt;)</code> ("same erasure").</li>
+  <li>Không dùng raw type; đừng bỏ qua cảnh báo "unchecked" (heap pollution).</li>
+  <li>Kiểu <em>khai báo</em> (field, tham số, class cha) vẫn còn trong <code>.class</code> (Signature) → reflection/Spring đọc được.</li>
+</ul>
+
+<h2>Lambda và Stream</h2>
+<pre><code>list.stream().filter(x -&gt; x &gt; 0).map(String::valueOf).collect(Collectors.toList());
+tu.parallelStream().collect(Collectors.groupingBy(String::length, Collectors.counting()));</code></pre>
+<ul>
+  <li>Không có thao tác cuối → stream không chạy. Đừng đặt việc quan trọng (log, ghi DB) trong <code>map</code>/<code>filter</code>.</li>
+  <li><code>parallel()</code>: không ghi vào biến dùng chung (dùng <code>collect</code>); <code>forEach</code> mất thứ tự (<code>forEachOrdered</code>); chạy trên common pool, không dùng cho I/O.</li>
+  <li>Chỉ dùng <code>parallel()</code> khi dữ liệu lớn + việc tính toán CPU + không side-effect, và đã đo.</li>
+</ul>
 
 <h2>Class bất biến (immutable)</h2>
 <pre><code>record DonHang(List&lt;String&gt; monHang) {
@@ -129,7 +229,7 @@ Executors.newVirtualThreadPerTaskExecutor()                       // Java 21, ch
 <tr><td>Dùng cho</td><td>Cờ dừng, 1 ghi – n đọc</td><td>Nhiều bước đi cùng nhau</td><td>Đếm, cập nhật 1 giá trị</td></tr>
 </table>
 <ul>
-  <li>Treo + thread <code>BLOCKED</code> + CPU ~0% → deadlock (bài 11).</li>
+  <li>Treo + thread <code>BLOCKED</code> + CPU ~0% → deadlock (bài 13).</li>
   <li>Treo + thread <code>RUNNABLE</code> + CPU 100% → vòng lặp không thoát (vd. cờ thiếu volatile).</li>
 </ul>
 

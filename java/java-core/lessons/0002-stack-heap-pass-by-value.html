@@ -3,38 +3,139 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Stack, heap và pass-by-value</title>
+<title>Stack, heap, metaspace</title>
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 
-<h1>Java luôn truyền giá trị</h1>
-<p class="subtitle">Bài 2 · Stack frame, heap, và câu phỏng vấn "pass-by-value hay pass-by-reference?"</p>
-<div class="meta"><span>~30 phút</span><span>Cần biết: <a href="0001-tu-source-den-bytecode.html">Bài 1</a> (local variable slot, javap)</span><span>Lab: <code>./lab/l0002</code></span></div>
+<h1>Bộ nhớ JVM: stack, heap, metaspace, và vì sao Java luôn truyền giá trị</h1>
+<p class="subtitle">Bài 2 (viết lại) · Ba vùng nhớ quan trọng nhất, mỗi vùng chứa gì, khi nào đầy, và câu phỏng vấn "pass-by-value hay pass-by-reference?"</p>
+<div class="meta"><span>~45 phút</span><span>Cần biết: <a href="0001-tu-source-den-bytecode.html">Bài 1</a> (javac, class được nạp vào JVM)</span><span>Thư mục thực hành: <code>lab/l0002</code></span></div>
 
-<div class="callout"><strong>Ôn bài 1 (trả lời trong đầu trước khi đọc)</strong>
-Trong một method <code>static</code>, slot 0 của biến cục bộ chứa gì? Lệnh <code>aload_0</code> làm gì với nó?
-<details><summary>Kiểm tra</summary>Slot 0 chứa tham số đầu tiên. <code>aload_0</code> đẩy giá trị trong slot 0 (một tham chiếu) lên operand stack.</details></div>
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Biết <strong>stack</strong>, <strong>heap</strong> và <strong>metaspace</strong> mỗi vùng chứa gì, sống bao lâu, ai dùng chung.</li>
+  <li>Nhìn một lỗi là biết vùng nào đầy: <code>StackOverflowError</code>, <code>OutOfMemoryError: Java heap space</code>, hay <code>OutOfMemoryError: Metaspace</code>.</li>
+  <li>Giải thích được <strong>vì sao Java luôn là pass-by-value</strong>, bằng sơ đồ bộ nhớ.</li>
+</ul>
 
-<div class="callout"><strong>Đoán trước khi đọc</strong>
-Mở <code>lab/l0002/PassByValue.java</code>. Có 4 method: <code>changeInt</code>, <code>changeField</code>, <code>reassign</code>, <code>swap</code>. Ghi ra giấy 4 dòng output mà bạn đoán, <em>rồi</em> mới chạy:
-<pre><code>cd lab/l0002 &amp;&amp; javac PassByValue.java &amp;&amp; java PassByValue</code></pre></div>
+<h2>1 · Câu chuyện: một văn phòng có ba khu vực</h2>
 
-<h2>1 · Hai vùng nhớ, hai luật chơi</h2>
-<p>JVM spec mô tả nhiều vùng nhớ runtime. Bài này chỉ cần hai vùng:<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5">[JVMS §2.5]</a></p>
+<div class="analogy">
+<p>Hình dung JVM là một <strong>văn phòng</strong>. Mỗi nhân viên trong đó là một <strong>thread</strong>. Văn phòng có ba khu vực:</p>
+<ul>
+  <li><strong>Bàn làm việc riêng của từng nhân viên (stack):</strong> mỗi khi bắt đầu một việc, nhân viên đặt lên bàn <strong>một tờ giấy nháp</strong> cho việc đó. Làm xong thì vứt tờ giấy đi ngay. Bàn chỉ to đến thế: chồng quá nhiều giấy là đổ.</li>
+  <li><strong>Kho chung (heap):</strong> mọi <strong>đồ vật</strong> thật đều để trong kho, và nhân viên nào cũng vào lấy được. Trên giấy nháp chỉ ghi "món đồ ở kệ số 7", chứ không bê món đồ lên bàn. Thỉnh thoảng có người dọn kho (GC), bỏ đi những món không còn ai ghi tên.</li>
+  <li><strong>Tủ hồ sơ bản thiết kế (metaspace):</strong> mỗi <strong>loại</strong> đồ vật có một bản thiết kế: có những bộ phận gì (field), làm được việc gì (method). Có 1 000 cái ghế thì vẫn chỉ có <strong>một</strong> bản thiết kế "Ghế".</li>
+</ul>
+</div>
+
 <table>
-  <tr><th></th><th>Stack (của mỗi thread)</th><th>Heap (dùng chung)</th></tr>
-  <tr><td>Chứa gì</td><td><strong>Frame</strong>: mỗi lần gọi method sinh ra một frame, gồm local variable slots và operand stack</td><td><strong>Object</strong> và mảng, tức mọi thứ tạo bằng <code>new</code></td></tr>
-  <tr><td>Sống đến khi</td><td>Method return thì frame bị bỏ ngay</td><td>Không còn ai tham chiếu tới, rồi GC dọn</td></tr>
-  <tr><td>Ai thấy</td><td>Chỉ thread đó</td><td>Mọi thread (gốc rễ của bug concurrency)</td></tr>
+  <tr><th></th><th>Stack</th><th>Heap</th><th>Metaspace</th></tr>
+  <tr><td><strong>Trong câu chuyện</strong></td><td>Bàn riêng + giấy nháp</td><td>Kho chung</td><td>Tủ bản thiết kế</td></tr>
+  <tr><td><strong>Chứa gì</strong></td><td><span class="term">Frame</span>: mỗi lần gọi method có một frame, chứa biến cục bộ và tham số</td><td><strong>Object</strong> và mảng (mọi thứ tạo bằng <code>new</code>)</td><td><strong>Thông tin về class</strong>: tên, field, method, bytecode</td></tr>
+  <tr><td><strong>Của ai</strong></td><td>Mỗi thread một stack riêng</td><td>Mọi thread dùng chung</td><td>Mọi thread dùng chung</td></tr>
+  <tr><td><strong>Sống tới khi</strong></td><td>Method return thì frame bị bỏ ngay</td><td>Không còn ai tham chiếu, rồi GC dọn (<a href="0009-gc-don-rac.html">bài 9</a>)</td><td>Class bị gỡ khỏi JVM (hiếm, chỉ khi ClassLoader của nó thành rác)</td></tr>
+  <tr><td><strong>Giới hạn bằng</strong></td><td><code>-Xss</code> (mặc định 1 MB/thread)</td><td><code>-Xmx</code></td><td><code>-XX:MaxMetaspaceSize</code> (mặc định không giới hạn)</td></tr>
+  <tr><td><strong>Đầy thì</strong></td><td><code>StackOverflowError</code></td><td><code>OutOfMemoryError: Java heap space</code></td><td><code>OutOfMemoryError: Metaspace</code></td></tr>
 </table>
-<p>Một slot chỉ chứa được hai loại giá trị: <strong>giá trị primitive</strong> (<code>int</code>, <code>double</code>...) hoặc <strong>tham chiếu</strong> (reference) trỏ tới object trên heap. Một slot không bao giờ chứa nguyên cả object.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.1">[JLS §4.1]</a> Trong bài, ta viết tham chiếu thành <code class="ref">@A1</code>. Bạn cứ hình dung nó như "địa chỉ" của object.</p>
+<p>Nguồn: JVM Specification mô tả các vùng nhớ runtime ở <a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5">JVMS §2.5</a>. Metaspace là cách HotSpot (JVM bạn đang dùng) hiện thực vùng "method area" trong spec.</p>
 
-<p class="big-idea">Khi gọi method, JVM <em>sao chép</em> giá trị trong slot của caller sang slot của frame mới. Với object, thứ được sao chép là <em>tham chiếu</em>, còn object thì vẫn nằm yên một chỗ trên heap.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.12.4.5">[JLS §15.12.4.5]</a></p>
+<h3>Ghép lại trong một dòng code</h3>
+<p>Chỉ một dòng <code>Box box = new Box(1);</code> trong <code>main</code> đã dùng tới cả ba vùng:</p>
+<pre><code>  STACK (thread main)          HEAP (dùng chung)             METASPACE (dùng chung)
+ ┌──────────────────────┐     ┌──────────────────────┐      ┌──────────────────────────┐
+ │ frame main           │     │ object @A1           │      │ class Box                │
+ │   box  = <span class="hl">@A1</span> ───────┼────►│   value = 1          │      │   field: int value       │
+ │   args = @...        │     │   (thuộc class) ─────┼─────►│   method: Box(int), ...  │
+ └──────────────────────┘     └──────────────────────┘      │   bytecode của method    │
+                                                            └──────────────────────────┘</code></pre>
+<ul>
+  <li><strong>Stack:</strong> biến <code>box</code> là một <span class="term">slot</span> trong frame của <code>main</code>. Nó chỉ chứa <strong>tham chiếu</strong> <code>@A1</code>, tức "món đồ ở kệ số A1".</li>
+  <li><strong>Heap:</strong> object thật, với field <code>value = 1</code>.</li>
+  <li><strong>Metaspace:</strong> bản thiết kế của class <code>Box</code>, được tạo ra lúc JVM <em>nạp</em> class (<a href="0001-tu-source-den-bytecode.html">bài 1</a>, <a href="0005-static-chay-khi-nao.html">bài 5</a>). Mọi object <code>Box</code> đều trỏ về cùng một bản thiết kế này.</li>
+</ul>
 
-<h2>2 · Vẽ ra từng trường hợp</h2>
+<h2>2 · Stack: chồng giấy nháp</h2>
+<p>Mỗi lần gọi method, JVM đặt thêm một <strong>frame</strong> lên đỉnh stack của thread đang chạy. Method return thì frame đó bị bỏ đi. Method gọi sau cùng sẽ xong trước, giống chồng giấy: tờ đặt sau cùng nằm trên cùng và được bỏ đi đầu tiên.<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.6">[JVMS §2.6]</a></p>
+<p>Mỗi frame chứa các <span class="term">slot</span> cho biến cục bộ và tham số. Một slot chỉ chứa được <strong>một con số</strong> (<code>int</code>, <code>double</code>...) hoặc <strong>một tham chiếu</strong>. <strong>Không bao giờ chứa nguyên cả object.</strong><a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html#jls-4.1">[JLS §4.1]</a></p>
 
-<h3>Trường hợp 2: <code>changeField(box)</code> → <code>box.value = 99</code></h3>
+<h3>Thí nghiệm: làm đổ chồng giấy</h3>
+<p><code>Depth.java</code> có một hàm gọi lại chính nó mãi không dừng (đệ quy). Mỗi lần gọi là thêm một frame, cho tới khi stack hết chỗ:</p>
+<pre><code>static void dive() { depth++; dive(); }</code></pre>
+<pre><code>cd lab/l0002
+javac Depth.java
+java -Xss256k Depth
+java -Xss1m Depth</code></pre>
+<div class="expect"><pre><code>StackOverflowError ở độ sâu 2732
+StackOverflowError ở độ sâu 22461</code></pre>
+<p style="margin:0">(Số trên máy bạn sẽ khác một chút sau mỗi lần chạy.)</p></div>
+<p><code>-Xss</code> đặt kích thước stack của mỗi thread. Stack lớn gấp 4 lần thì đệ quy được sâu hơn nhiều. Ngoài đời, <code>StackOverflowError</code> thường đến từ <strong>đệ quy vô tình</strong>. Ví dụ hai entity JPA trỏ qua lại nhau (<code>Order</code> có <code>Customer</code>, <code>Customer</code> có list <code>Order</code>), và <code>toString()</code> hoặc thư viện chuyển sang JSON cứ gọi qua gọi lại không dừng.</p>
+
+<h2>3 · Heap: kho chung</h2>
+<p>Mọi object tạo bằng <code>new</code> đều nằm trong heap. Heap dùng chung cho mọi thread. Đó là lý do hai thread cùng sửa một object thì sinh ra race condition (<a href="0012-race-condition.html">bài 12</a>). Object nào không còn tham chiếu nào trỏ tới thì GC dọn đi (<a href="0009-gc-don-rac.html">bài 9</a>). Kích thước tối đa của heap đặt bằng <code>-Xmx</code>. Đầy mà GC không dọn được thêm thì JVM báo <code>OutOfMemoryError: Java heap space</code>.</p>
+
+<h2>4 · Metaspace: tủ bản thiết kế (phần mới)</h2>
+<p>Khi JVM nạp một class (bài 1, bài 5), nó phải lưu lại mọi thông tin về class đó: tên, các field, các method và bytecode của chúng. Những thông tin này gọi là <span class="term">class metadata</span>, và từ Java 8 chúng được cất trong <span class="term">Metaspace</span>.</p>
+<ul>
+  <li>Metaspace <strong>không nằm trong heap</strong>. Nó dùng <em>native memory</em>, tức bộ nhớ JVM xin thẳng từ hệ điều hành. Vì vậy <code>-Xmx</code> <strong>không</strong> giới hạn được Metaspace.</li>
+  <li>Trước Java 8, thông tin class nằm trong một vùng tên là <strong>PermGen</strong> (permanent generation), có kích thước cố định nhỏ, rất hay gây lỗi <code>OutOfMemoryError: PermGen space</code>. Java 8 bỏ hẳn PermGen và thay bằng Metaspace.<a class="cite" href="https://openjdk.org/jeps/122">[JEP 122: Remove the Permanent Generation]</a></li>
+  <li>Oracle viết: <em>"The amount of native memory that can be used for class metadata is by default unlimited. Use the option -XX:MaxMetaspaceSize to put an upper limit."</em><a class="cite" href="https://docs.oracle.com/en/java/javase/21/gctuning/other-considerations.html">[Oracle GC Tuning Guide: Class Metadata]</a></li>
+</ul>
+
+<h3>Tận mắt xem heap và metaspace của một chương trình</h3>
+<p>Cờ <code>-Xlog:gc+heap+exit</code> bảo JVM in tình trạng bộ nhớ ngay trước khi thoát:</p>
+<pre><code>javac PassByValue.java
+java -Xlog:gc+heap+exit PassByValue | grep -E -i 'garbage-first|Metaspace|class space'</code></pre>
+<div class="expect"><pre><code> garbage-first heap   total 516096K, used 3531K ...      ← HEAP: đang dùng ~3,5 MB
+ Metaspace       used 232K, committed 448K, ...         ← METASPACE: tách riêng, ~232 KB
+  class space    used 13K, committed 128K, ...</code></pre></div>
+<p>Heap và Metaspace được báo cáo <strong>riêng</strong>, đúng như sơ đồ ở mục 1. Một chương trình nhỏ chỉ dùng vài trăm KB Metaspace. Một ứng dụng Spring Boot nạp hàng chục nghìn class (của bạn, của Spring, của thư viện...) nên thường dùng tới hàng chục hoặc hàng trăm MB Metaspace.</p>
+
+<h3>Thí nghiệm: làm đầy tủ bản thiết kế</h3>
+<p>Bài 17 cho thấy JVM có thể <strong>sinh ra class mới lúc đang chạy</strong> (dynamic proxy, <code>$Proxy0</code>). <code>MetaspaceLeak.java</code> lợi dụng điều đó: mỗi vòng lặp tạo một ClassLoader mới, buộc JVM sinh thêm <strong>một class proxy mới</strong>, rồi giữ mãi trong một list static, nên không class nào được gỡ đi:</p>
+<pre><code>ClassLoader loader = new URLClassLoader(new URL[0], MetaspaceLeak.class.getClassLoader());
+Object proxy = Proxy.newProxyInstance(loader, new Class&lt;?&gt;[]{ Runnable.class }, (p, m, a) -&gt; null);
+giuLai.add(proxy);     // giữ mãi → class không bao giờ được dọn</code></pre>
+<p>Chạy với Metaspace giới hạn 20 MB:</p>
+<pre><code>javac MetaspaceLeak.java
+java -XX:MaxMetaspaceSize=20m MetaspaceLeak</code></pre>
+<div class="expect"><pre><code>Đã sinh 2000 class
+Sập sau 3224 class: java.lang.OutOfMemoryError: <span class="bad-hl">Metaspace</span></code></pre></div>
+<p>Heap gần như trống, vì mỗi object proxy rất nhỏ. Thứ bị đầy là <strong>tủ bản thiết kế</strong>, do có quá nhiều class.</p>
+<p><strong>Ngoài đời</strong>, <code>OutOfMemoryError: Metaspace</code> thường đến từ: thư viện sinh class lúc chạy một cách mất kiểm soát (proxy, CGLIB, script engine); hoặc ở các app server cũ, mỗi lần redeploy ứng dụng mà không restart JVM, ClassLoader cũ bị giữ lại nên toàn bộ class cũ không được gỡ. Khi gặp lỗi này, hướng điều tra là "ai đang sinh ra hoặc giữ lại quá nhiều class", chứ <strong>không</strong> phải tăng <code>-Xmx</code>.</p>
+
+<div class="remember">
+<ul style="margin:0">
+  <li><strong>Stack</strong>: biến cục bộ và tham số, riêng từng thread → <code>StackOverflowError</code>, chỉnh bằng <code>-Xss</code>.</li>
+  <li><strong>Heap</strong>: object, dùng chung → <code>OutOfMemoryError: Java heap space</code>, chỉnh bằng <code>-Xmx</code>.</li>
+  <li><strong>Metaspace</strong>: thông tin class, native memory, dùng chung → <code>OutOfMemoryError: Metaspace</code>, chỉnh bằng <code>-XX:MaxMetaspaceSize</code>.</li>
+</ul>
+</div>
+
+<h2>5 · Pass-by-value: Java luôn truyền <em>bản sao</em></h2>
+<p>Giờ ta dùng hiểu biết về stack và heap để trả lời câu phỏng vấn kinh điển. Quy tắc chỉ có một câu:</p>
+<p class="big-idea">Khi gọi method, JVM <strong>chép giá trị</strong> trong slot của bên gọi sang slot trong frame mới. Với số thì chép con số. Với object thì chép <strong>tham chiếu</strong> (tờ giấy ghi số kệ). Object thì vẫn nằm yên trong heap, không bị chép.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.12.4.5">[JLS §15.12.4.5]</a></p>
+
+<div class="analogy">Bạn photo tờ giấy "món đồ ở kệ số 7" rồi đưa bản photo cho đồng nghiệp. Đồng nghiệp có thể <strong>tới kệ số 7 sơn lại món đồ</strong>, và bạn sẽ thấy món đồ đã bị sơn. Nhưng nếu đồng nghiệp <strong>gạch bản photo, viết thành "kệ số 9"</strong>, thì tờ giấy gốc của bạn vẫn ghi "kệ số 7".</div>
+
+<p>Mở <code>PassByValue.java</code>. Có 4 method:</p>
+<pre><code>static void changeInt(int x)      { x = 99; }                  // đổi số
+static void changeField(Box b)    { b.value = 99; }            // sửa object
+static void reassign(Box b)       { b = new Box(99); }         // gán biến sang object khác
+static void swap(Box a, Box b)    { Box t = a; a = b; b = t; } // đổi chỗ hai biến</code></pre>
+<p><strong>Đoán trước 4 dòng output</strong>, ghi ra giấy, rồi chạy:</p>
+<pre><code>javac PassByValue.java
+java PassByValue</code></pre>
+<div class="expect"><pre><code>1. n = 1
+2. box.value = 99
+3. box2.value = 1
+4. p = 1, q = 2</code></pre></div>
+
+<h3>Từng trường hợp, vẽ ra stack và heap</h3>
+<p><strong>1. <code>changeInt(n)</code>:</strong> số 1 được chép vào slot <code>x</code> của <code>changeInt</code>. Gán <code>x = 99</code> chỉ đổi bản chép. <code>n</code> của <code>main</code> vẫn là 1.</p>
+
+<p><strong>2. <code>changeField(box)</code>:</strong> tham chiếu <code>@A1</code> được chép sang <code>b</code>. Cả hai tờ giấy cùng chỉ một object, nên sửa field qua <code>b</code> thì <code>main</code> cũng thấy:</p>
 <div class="mem">
   <div class="mem-col"><h4>Stack</h4>
     <div class="frame top"><div class="frame-name">changeField</div><div class="slot"><span>b</span><span class="ref">@A1</span></div></div>
@@ -43,10 +144,10 @@ Mở <code>lab/l0002/PassByValue.java</code>. Có 4 method: <code>changeInt</cod
   <div class="mem-col"><h4>Heap</h4>
     <div class="obj"><div class="obj-name">@A1 · Box</div><div class="slot"><span>value</span><span><span class="old">1</span>99</span></div></div>
   </div>
-  <p class="mem-caption"><code>b</code> và <code>box</code> là hai slot khác nhau, nhưng giữ cùng một tham chiếu. Sửa field của object thì cả hai đều thấy thay đổi.</p>
+  <p class="mem-caption">Hai slot khác nhau, cùng giữ một tham chiếu, nên cùng thấy object bị sửa ("sơn lại món đồ").</p>
 </div>
 
-<h3>Trường hợp 3: <code>reassign(box2)</code> → <code>b = new Box(99)</code></h3>
+<p><strong>3. <code>reassign(box2)</code>:</strong> <code>b</code> được gán sang một object <strong>mới</strong>. Việc này chỉ ghi đè slot <code>b</code> trong frame của <code>reassign</code> ("gạch bản photo"). Slot <code>box2</code> của <code>main</code> không bị đụng tới:</p>
 <div class="mem">
   <div class="mem-col"><h4>Stack</h4>
     <div class="frame top"><div class="frame-name">reassign</div><div class="slot"><span>b</span><span><span class="old">@B1</span><span class="ref">@B2</span></span></div></div>
@@ -54,87 +155,94 @@ Mở <code>lab/l0002/PassByValue.java</code>. Có 4 method: <code>changeInt</cod
   </div>
   <div class="mem-col"><h4>Heap</h4>
     <div class="obj"><div class="obj-name">@B1 · Box</div><div class="slot"><span>value</span><span>1</span></div></div>
-    <div class="obj garbage"><div class="obj-name">@B2 · Box (thành rác sau khi return)</div><div class="slot"><span>value</span><span>99</span></div></div>
+    <div class="obj garbage"><div class="obj-name">@B2 · Box (thành rác khi reassign return)</div><div class="slot"><span>value</span><span>99</span></div></div>
   </div>
-  <p class="mem-caption">Gán lại <code>b</code> chỉ ghi đè slot của <code>reassign</code>. Slot <code>box2</code> của <code>main</code> không bị đụng tới.</p>
+  <p class="mem-caption">Gán lại tham số chỉ đổi bản sao trong frame của method được gọi.</p>
 </div>
 
-<p>Bytecode cho thấy đúng điều này (<code>javap -c PassByValue</code>):</p>
-<pre><code>static void changeField(PassByValue$Box);
-   0: aload_0              <span class="ask">// lấy tham chiếu trong slot 0</span>
-   1: bipush 99
-   3: <span class="hl">putfield</span> value       <span class="ask">// ghi vào object trên HEAP</span>
+<p><strong>4. <code>swap(p, q)</code>:</strong> <code>a</code> và <code>b</code> là hai bản chép của tham chiếu. Đổi chỗ hai bản chép thì <code>p</code> và <code>q</code> của <code>main</code> vẫn y nguyên. Vì vậy trong Java <strong>không viết được</strong> hàm <code>swap</code> đổi chỗ hai biến của người gọi.</p>
 
-static void reassign(PassByValue$Box);
-   0: new PassByValue$Box  <span class="ask">// tạo object mới trên heap</span>
-   ...
-   9: <span class="hl">astore_0</span>             <span class="ask">// ghi đè slot 0 của frame NÀY</span></code></pre>
-<p>Chỉ có hai cách để "thay đổi" một thứ: <code>putfield</code> sửa object (ai cầm tham chiếu cũng thấy), còn <code>astore</code> sửa slot (chỉ frame đó thấy). Không lệnh bytecode nào cho phép một method ghi vào slot thuộc frame của method khác. Vì thế Java <strong>không thể</strong> có pass-by-reference.</p>
+<h3>Bằng chứng ở bytecode</h3>
+<p><code>javap -c PassByValue</code> cho thấy hai cách "thay đổi" khác nhau hoàn toàn:</p>
+<pre><code>changeField:  aload_0 ... <span class="hl">putfield</span> value    // ghi vào OBJECT trên heap → ai giữ tham chiếu cũng thấy
+reassign:     new Box ...   <span class="hl">astore_0</span>          // ghi vào SLOT 0 của frame hiện tại → chỉ frame này thấy</code></pre>
+<p>Không có lệnh bytecode nào cho phép một method ghi vào slot thuộc frame của method <em>khác</em>. Vì thế Java <strong>không thể</strong> có pass-by-reference.</p>
 
-<div class="callout"><strong>Câu trả lời phỏng vấn mẫu</strong>
-"Java luôn là pass-by-value. Với primitive, giá trị được sao chép. Với object, <em>tham chiếu</em> được sao chép. Vì vậy method sửa được trạng thái của object, nhưng không làm biến của caller trỏ sang object khác được. Ví dụ: hàm <code>swap(a, b)</code> không hoạt động trong Java."</div>
+<div class="callout"><strong>Câu phỏng vấn: "Java là pass-by-value hay pass-by-reference?"</strong>
+<p><em>"Java luôn là pass-by-value. Khi gọi method, giá trị trong biến của người gọi được chép sang tham số. Với primitive thì chép con số. Với object thì chép tham chiếu, còn bản thân object nằm trên heap và không bị chép. Vì cùng trỏ tới một object, method sửa được trạng thái của object và người gọi thấy được. Nhưng gán tham số sang object khác chỉ đổi bản sao, biến của người gọi không đổi. Bằng chứng: không viết được hàm <code>swap(a, b)</code> đổi chỗ hai biến của người gọi."</em></p></div>
 
-<h2>3 · Stack có giới hạn</h2>
-<p>Mỗi thread có một stack riêng với kích thước cố định. Trên máy này mặc định là 1 MB (<code>ThreadStackSize = 1024</code> KB), và chỉnh được bằng <code>-Xss</code>.<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/specs/man/java.html">[java man: -Xss]</a> Đệ quy không có điểm dừng sẽ đẩy thêm frame cho đến khi stack đầy:</p>
-<pre><code>javac Depth.java
-java -Xss256k Depth   <span class="ask"># StackOverflowError ở độ sâu ~2 679</span>
-java -Xss1m   Depth   <span class="ask"># ~22 000</span>
-java -Xss4m   Depth   <span class="ask"># ~101 000</span></code></pre>
-<p>Con số này đổi một chút sau mỗi lần chạy (22 364, 22 203, 22 350...). Lý do là frame của code đang thông dịch và frame của code đã JIT có kích thước khác nhau (nhớ lại <a href="0001-tu-source-den-bytecode.html">bài 1</a>). Ngoài production, <code>StackOverflowError</code> thường đến từ đệ quy vô tình, ví dụ hai entity trỏ qua lại nhau và <code>toString()</code>/JSON serialize gọi nhau mãi không dừng.</p>
-
-<h2>4 · Kiểm tra</h2>
+<h2>6 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
 <div class="quiz" data-quiz="q2"></div>
 <script type="application/json" id="q2">[
- {"q":"<code>Box b = new Box(1);</code> trong <code>main</code>. Theo mô hình JVM, cái gì nằm trong frame của <code>main</code>?",
-  "options":["Cả object Box lẫn field value của nó","Chỉ field value, còn biến b nằm trên heap","Biến b, chứa một tham chiếu tới object","Không có gì, mọi thứ đều nằm trên heap"],
-  "answer":2,"why":"Slot chỉ chứa primitive hoặc tham chiếu. Object (cùng field <code>value</code>) nằm trên heap; slot <code>b</code> trong frame chỉ giữ tham chiếu tới nó."},
- {"q":"Vì sao <code>swap(p, q)</code> không đổi được <code>p</code> và <code>q</code> của <code>main</code>?",
+ {"q":"<code>Box b = new Box(1);</code> trong <code>main</code>. Cái gì nằm trong <strong>frame của main</strong> trên stack?",
+  "options":["Cả object Box lẫn field value của nó","Biến b, chứa tham chiếu tới object","Bản thiết kế class Box với các method","Không có gì, mọi thứ nằm trên heap"],
+  "answer":1,"why":"Slot trong frame chỉ chứa số hoặc tham chiếu. Object (với field <code>value</code>) nằm trên heap; thông tin class <code>Box</code> nằm trong Metaspace."},
+ {"q":"Log báo <code>java.lang.OutOfMemoryError: Metaspace</code>. Vùng nào đã đầy, và vì sao?",
+  "options":["Vùng chứa thông tin class, vì có quá nhiều class","Vùng heap, vì có quá nhiều object được tạo","Vùng stack, vì đệ quy gọi lại quá sâu","Vùng String pool, vì có quá nhiều chuỗi"],
+  "answer":0,"why":"Metaspace chứa class metadata. Lỗi này nghĩa là có quá nhiều class được nạp hoặc sinh ra (proxy, CGLIB, ClassLoader bị giữ lại). Tăng <code>-Xmx</code> không giúp gì, vì Metaspace nằm ngoài heap."},
+ {"q":"Vì sao <code>swap(p, q)</code> không đổi chỗ được <code>p</code> và <code>q</code> của <code>main</code>?",
   "options":["Vì object Box là immutable, không đổi được","Vì JVM khoá object khi đang truyền vào","Vì thiếu từ khoá final ở hai tham số","Vì swap chỉ đổi hai bản sao trong frame riêng"],
-  "answer":3,"why":"<code>a</code> và <code>b</code> là slot trong frame của <code>swap</code>, mỗi slot giữ bản sao tham chiếu. Đổi chỗ hai slot đó không ảnh hưởng gì tới slot <code>p</code>, <code>q</code> của <code>main</code>."},
- {"q":"Trong <code>reassign(Box b)</code> (static), lệnh <code>astore_0</code> ghi vào đâu?",
-  "options":["Slot 0 trong frame của chính reassign","Slot box2 trong frame của method main","Field value của object Box trên heap","Vùng nhớ chung mà mọi thread đều thấy"],
-  "answer":0,"why":"<code>astore_n</code> luôn ghi vào slot của frame hiện tại. Không lệnh nào ghi được vào frame của method khác, đó là bằng chứng ở mức bytecode cho pass-by-value."},
- {"q":"<code>StackOverflowError</code> thực chất xảy ra khi nào?",
-  "options":["Khi heap hết chỗ để tạo thêm object mới","Khi stack của thread hết chỗ cho frame mới","Khi có quá nhiều thread chạy cùng một lúc","Khi GC không kịp dọn rác trên vùng heap"],
-  "answer":1,"why":"Mỗi lần gọi method sinh ra một frame trên stack của thread. Đệ quy không dừng làm stack đầy (mặc định ~1 MB). Heap hết chỗ là một lỗi khác: <code>OutOfMemoryError</code>."},
- {"q":"Câu nào mô tả đúng nhất cách Java truyền một object vào method?",
-  "options":["Truyền object bằng reference như C++ &amp;","Sao chép toàn bộ object sang frame mới","Truyền giá trị, và giá trị đó là tham chiếu","Tuỳ object là mutable hay là immutable"],
-  "answer":2,"why":"Java luôn là pass-by-value (JLS §15.12.4.5). Với object, giá trị được sao chép là tham chiếu. Method sửa được object, nhưng không đổi được biến của caller."}
+  "answer":3,"why":"<code>a</code>, <code>b</code> là slot trong frame của <code>swap</code>, giữ bản chép của tham chiếu. Đổi chỗ chúng không ảnh hưởng tới slot <code>p</code>, <code>q</code> của <code>main</code>."},
+ {"q":"Đệ quy gọi lại mãi không dừng thì lỗi gì xảy ra, và chỉnh giới hạn bằng cờ nào?",
+  "options":["OutOfMemoryError: Java heap space, chỉnh -Xmx","OutOfMemoryError: Metaspace, chỉnh -XX:MaxMetaspaceSize","StackOverflowError, chỉnh bằng cờ -Xss","Không lỗi gì, JVM tự dừng đệ quy lại"],
+  "answer":2,"why":"Mỗi lần gọi thêm một frame lên stack của thread. Stack đầy thì <code>StackOverflowError</code>. Kích thước stack mỗi thread đặt bằng <code>-Xss</code>."},
+ {"q":"(Ôn bài 3) Class chỉ override <code>equals</code>, không override <code>hashCode</code>. Vì sao <code>HashSet.contains</code> thường trả về <code>false</code> dù đã có object bằng nhau?",
+  "options":["Vì hashCode khác nên HashSet tìm sai kệ","Vì HashSet chỉ dùng toán tử == để so sánh","Vì equals chỉ được gọi khi chạy debug","Vì object bị GC dọn trước khi tìm thấy"],
+  "answer":0,"why":"HashSet chọn \"kệ\" (bucket) bằng <code>hashCode</code> trước. Hash mặc định khác nhau với từng object, nên tìm sai kệ và <code>equals</code> không bao giờ được gọi."}
 ]</script>
 
-<h2>5 · Thử thách</h2>
+<h2>7 · Thử thách</h2>
 <div class="lab">
 <h3>A. Đoán output (không chạy trước!)</h3>
 <pre><code>static void a(int[] arr)        { arr[0] = 10; arr = new int[]{20}; arr[0] = 30; }
 static void b(StringBuilder sb) { sb.append(" world"); sb = new StringBuilder("bye"); }
 static void c(String s)         { s = s + "!"; }
 
-int[] arr = {1};                 a(arr);
-StringBuilder sb = new StringBuilder("hello"); b(sb);
-String s = "hi";                 c(s);
+int[] arr = {1};                                a(arr);
+StringBuilder sb = new StringBuilder("hello");  b(sb);
+String s = "hi";                                c(s);
 System.out.println(arr[0] + " | " + sb + " | " + s);</code></pre>
-<p>Viết đáp án ra giấy, vẽ sơ đồ stack/heap cho hàm <code>a</code>, rồi mới chạy <code>javac Challenge.java &amp;&amp; java Challenge</code>.</p>
-<details><summary>Đáp án</summary>
-<p><code>10 | hello world | hi</code></p>
+<p>Vẽ sơ đồ stack/heap cho hàm <code>a</code> ra giấy, ghi đáp án, rồi mới chạy <code>javac Challenge.java &amp;&amp; java Challenge</code>.</p>
+<details><summary>Xem đáp án</summary>
+<div class="expect"><pre><code>10 | hello world | hi</code></pre></div>
 <ul>
-<li><code>a</code>: <code>arr[0] = 10</code> sửa mảng gốc trên heap. Sau đó <code>arr</code> được gán sang mảng mới, nên <code>arr[0] = 30</code> chỉ sửa mảng mới (sẽ thành rác).</li>
-<li><code>b</code>: <code>append</code> sửa object gốc. Gán <code>sb</code> sang object mới chỉ tác động tới slot của <code>b</code>.</li>
-<li><code>c</code>: <code>String</code> là immutable, nên <code>s + "!"</code> tạo ra object mới rồi gán vào slot của <code>c</code>. Đây là cùng cơ chế với <code>reassign</code>.</li>
-</ul></details>
+<li><code>a</code>: <code>arr[0] = 10</code> sửa mảng gốc trên heap ("sơn món đồ"). Sau đó <code>arr</code> bị gán sang mảng mới ("gạch bản photo"), nên <code>arr[0] = 30</code> chỉ sửa mảng mới, và mảng mới sẽ thành rác.</li>
+<li><code>b</code>: <code>append</code> sửa object gốc. Gán <code>sb</code> sang object mới chỉ đổi bản sao.</li>
+<li><code>c</code>: <code>String</code> không sửa được (bài 4), nên <code>s + "!"</code> tạo object mới rồi gán vào bản sao <code>s</code>. Cùng cơ chế với <code>reassign</code>.</li>
+</ul>
+<p>Nhận xét: <code>String</code> "trông như" pass-by-value còn <code>StringBuilder</code> "trông như" pass-by-reference. Thật ra cả hai đều là pass-by-value. Khác biệt duy nhất là <code>StringBuilder</code> có method sửa được object, còn <code>String</code> thì không.</p>
+</details>
 
-<h3>B. Tìm frame trong bytecode</h3>
-<p>Chạy <code>javap -v PassByValue | grep -A4 'void swap'</code> rồi tìm dòng <code>stack=..., locals=...</code> của <code>swap</code>. Đoán trước: <code>locals</code> bằng bao nhiêu, và mỗi slot là gì?</p>
-<details><summary>Đáp án</summary>
-<p><code>locals=3</code>: slot 0 = <code>a</code>, slot 1 = <code>b</code>, slot 2 = <code>t</code>. Kích thước frame được <code>javac</code> tính sẵn từ lúc build và ghi vào file .class.<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-4.html#jvms-4.7.3">[JVMS §4.7.3]</a></p></details>
+<h3>B. Khi Metaspace không có giới hạn</h3>
+<p>Chạy lại <code>MetaspaceLeak</code> nhưng <strong>không</strong> có <code>-XX:MaxMetaspaceSize=20m</code>, kèm <code>timeout 10</code> để tự dừng sau 10 giây:</p>
+<pre><code>timeout 10 java MetaspaceLeak | tail -2</code></pre>
+<p><strong>Đoán trước:</strong> lần này có in ra <code>OutOfMemoryError: Metaspace</code> không? Vì sao?</p>
+<details><summary>Xem đáp án</summary>
+<div class="expect"><pre><code>Đã sinh 38000 class
+Đã sinh 40000 class</code></pre>
+<p style="margin:0">Rồi bị <code>timeout</code> giết sau 10 giây, mà không có lỗi nào.</p></div>
+<p>Không đặt giới hạn thì Metaspace mặc định là <strong>không giới hạn</strong>, nên chương trình cứ sinh class và chiếm thêm bộ nhớ hệ điều hành (hơn 40 000 class chỉ trong 10 giây), cho tới khi bị giết hoặc máy hết RAM. Ở production, nên đặt <code>-XX:MaxMetaspaceSize</code> để lỗi lộ ra sớm và rõ ràng là <code>OutOfMemoryError: Metaspace</code>, thay vì để JVM âm thầm ăn hết RAM của máy chủ.</p>
+</details>
 </div>
 
+<details class="deep"><summary>Đào sâu: danh sách đầy đủ các vùng nhớ runtime trong JVM Spec</summary>
+<p>JVMS §2.5 liệt kê 6 vùng nhớ runtime.<a class="cite" href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5">[JVMS §2.5]</a> Bài này đã học ba vùng quan trọng nhất. Ba vùng còn lại:</p>
+<ul>
+  <li><strong>PC register:</strong> mỗi thread có một "ngón tay chỉ" vào lệnh bytecode đang chạy.</li>
+  <li><strong>Native method stack:</strong> stack dành cho code viết bằng C/C++ mà JVM gọi tới (method <code>native</code>).</li>
+  <li><strong>Run-time constant pool:</strong> bảng hằng số của từng class (tên class, tên method, chuỗi literal... những thứ bạn thấy dạng <code>#7</code> trong <code>javap</code> ở bài 1). Trong HotSpot, nó nằm cùng thông tin class trong Metaspace.</li>
+</ul>
+<p>Spec gọi vùng chứa thông tin class là <strong>method area</strong>. Spec chỉ nói phải có vùng này, còn cách hiện thực thì tuỳ JVM. HotSpot từ Java 8 hiện thực nó bằng Metaspace. Ngoài ra còn những vùng native memory khác ngoài heap: code cache (nơi JIT ở bài 8 cất mã máy), stack của các thread, bộ nhớ của thư viện mạng... Vì vậy tổng RAM một tiến trình Java dùng luôn <strong>lớn hơn</strong> <code>-Xmx</code>. Đây là điều rất quan trọng khi đặt giới hạn bộ nhớ cho container Docker hay Kubernetes.</p>
+</details>
+
 <hr>
-<h2>Đọc thêm (nguồn chính)</h2>
-<p><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5">JVMS SE 21, §2.5 Run-Time Data Areas và §2.6 Frames</a>. Bạn sẽ thấy cả các vùng nhớ chưa học (method area, run-time constant pool, PC register). Chúng sẽ quay lại ở các bài class loading và GC.</p>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html#jvms-2.5">JVM Specification SE 21, §2.5 Run-Time Data Areas và §2.6 Frames</a>: định nghĩa chính thức các vùng nhớ. Về Metaspace: <a href="https://docs.oracle.com/en/java/javase/21/gctuning/other-considerations.html">Oracle GC Tuning Guide, mục Class Metadata</a> (ngắn) và <a href="https://openjdk.org/jeps/122">JEP 122</a> (lý do bỏ PermGen).</p>
 
-<p class="ask">Có chỗ nào chưa rõ? Cứ hỏi agent (giáo viên của bạn). Một gợi ý để tự kiểm tra: hãy giải thích bằng lời vì sao <code>String</code> trong thử thách A "trông như" pass-by-value còn <code>StringBuilder</code> thì "trông như" pass-by-reference, dù thực chất cả hai giống hệt nhau. Gửi câu trả lời cho agent để được nhận xét.</p>
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "biến static nằm ở stack, heap hay metaspace?", "mảng int[] nằm ở đâu?", "Docker giới hạn 1 GB thì nên đặt -Xmx bao nhiêu?"... Nhớ gửi kết quả quiz và đáp án thử thách để mình nhận xét.</p>
 
-<div class="footer-nav"><a href="0001-tu-source-den-bytecode.html">← Bài 1: Từ source đến bytecode</a><a href="0003-equals-hashcode.html">Bài 3: equals và hashCode →</a></div>
+<div class="footer-nav"><a href="0001-tu-source-den-bytecode.html">← Bài 1: Từ source đến bytecode</a><a href="0003-equals-hashcode.html">Bài 3: ==, equals, hashCode →</a></div>
 
 <script src="../assets/quiz.js"></script>
 </body>

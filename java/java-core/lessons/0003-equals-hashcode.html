@@ -3,102 +3,259 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>equals và hashCode</title>
+<title>equals, hashCode và ==</title>
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 
-<h1>Hai object "bằng nhau" mà HashSet không tìm thấy</h1>
-<p class="subtitle">Bài 3 · <code>==</code> vs <code>equals</code>, và vì sao override <code>equals</code> thì bắt buộc override <code>hashCode</code></p>
-<div class="meta"><span>~30 phút</span><span>Cần biết: <a href="0002-stack-heap-pass-by-value.html">Bài 2</a> (slot chứa tham chiếu)</span><span>Lab: <code>./lab/l0003</code></span></div>
+<h1><code>==</code>, <code>equals</code> và <code>hashCode</code>: ba câu hỏi khác nhau</h1>
+<p class="subtitle">Bài 3 (viết lại) · Hiểu từng cái làm gì, vì sao phải override <code>equals</code> và <code>hashCode</code> cùng nhau, và cách viết chúng cho đúng</p>
+<div class="meta"><span>~40 phút</span><span>Cần biết: viết được class Java có field và constructor</span><span>Thư mục thực hành: <code>lab/l0003</code></span></div>
 
-<div class="callout"><strong>Ôn bài 2 (trả lời trong đầu trước khi đọc)</strong>
-<code>Box a = new Box(1); Box b = new Box(1);</code>. Slot <code>a</code> và slot <code>b</code> chứa gì? Trên heap có mấy object?
-<details><summary>Kiểm tra</summary>Mỗi slot chứa một tham chiếu, và hai tham chiếu này <em>khác nhau</em> (<code>@A1</code>, <code>@A2</code>). Trên heap có hai object riêng biệt, chỉ tình cờ có cùng giá trị field.</details></div>
-
-<div class="callout"><strong>Đoán trước khi chạy</strong>
-<code>lab/l0003/Equality.java</code> có 4 phiên bản class <code>Point(1, 2)</code>: P1 không override gì, P2 chỉ override <code>equals</code>, P3 override cả <code>equals</code> và <code>hashCode</code>, P4 là <code>record</code>. Với mỗi phiên bản, đoán ba giá trị: <code>a == b</code>, <code>a.equals(b)</code>, và <code>set.contains(b)</code> (khi set chỉ chứa <code>a</code>). Ghi ra giấy rồi chạy:
-<pre><code>cd lab/l0003 &amp;&amp; javac Equality.java &amp;&amp; java Equality</code></pre></div>
-
-<h2>1 · <code>==</code> so sánh slot, <code>equals</code> là một method</h2>
-<pre><code>P1: ==false equals=false
-P2: ==false equals=true  <span class="bad-hl">set.contains=false</span>   <span class="ask">// ?!</span>
-P3: ==false equals=true  set.contains=true
-P4: ==false equals=true  set.contains=true</code></pre>
-<p>Xem bytecode (<code>javap -c Ops</code>) để thấy hai phép so sánh khác nhau thế nào ở cấp độ JVM:</p>
-<pre><code>a == b      (Object) → <span class="hl">if_acmpne</span>       <span class="ask">// so 2 tham chiếu</span>
-a == b      (int)    → <span class="hl">if_icmpne</span>       <span class="ask">// so 2 số nguyên</span>
-a.equals(b)          → <span class="hl">invokevirtual</span> Object.equals</code></pre>
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
 <ul>
-  <li><strong><code>==</code></strong> chỉ so sánh hai giá trị trong slot. Với object, giá trị đó là tham chiếu. Vì vậy <code>==</code> trả lời câu hỏi "có phải <em>cùng một object</em> không?", và hai object tạo bằng hai lần <code>new</code> luôn cho <code>false</code>.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.21.3">[JLS §15.21.3]</a></li>
-  <li><strong><code>equals</code></strong> chỉ là một method bình thường. Bản mặc định trong <code>Object</code> là <code>return (this == obj);</code>, tức <em>y hệt</em> <code>==</code>.<a class="cite" href="https://github.com/openjdk/jdk21u/blob/master/src/java.base/share/classes/java/lang/Object.java#L163-L165">[Object.java]</a> Đó là lý do P1 cho <code>equals=false</code>. Muốn so sánh theo nội dung thì bạn phải tự override.</li>
+  <li>Giải thích được <code>==</code>, <code>equals</code> và <code>hashCode</code> mỗi cái trả lời câu hỏi gì.</li>
+  <li>Tự viết được <code>equals</code> và <code>hashCode</code> đúng cho một class, hoặc biết khi nào dùng <code>record</code> để khỏi phải viết.</li>
+  <li>Hiểu vì sao "chỉ override <code>equals</code>" làm <code>HashSet</code> và <code>HashMap</code> không tìm thấy dữ liệu, và tránh được hai bẫy hay gặp khi đi làm.</li>
 </ul>
 
-<h2>2 · HashSet không gọi <code>equals</code> trước</h2>
-<p><code>HashSet</code> bên trong là một <code>HashMap</code>. Đây là nguyên văn đoạn code tra cứu trong JDK 21:<a class="cite" href="https://github.com/openjdk/jdk21u/blob/master/src/java.base/share/classes/java/util/HashMap.java#L573-L589">[HashMap.java]</a></p>
-<pre><code>final Node&lt;K,V&gt; getNode(Object key) {
-    ...
-    (first = tab[(n - 1) &amp; (<span class="hl">hash = hash(key)</span>)]) != null) {   <span class="ask">// ① chọn bucket</span>
-        if (<span class="hl">first.hash == hash</span> &amp;&amp;                           <span class="ask">// ② so hash</span>
-            ((k = first.key) == key || (key != null &amp;&amp; <span class="hl">key.equals(k)</span>)))  <span class="ask">// ③</span>
-            return first;</code></pre>
-<ol class="flow">
-  <li>Gọi <code>key.hashCode()</code>, rồi dùng kết quả để chọn <strong>bucket</strong> (một ô trong mảng <code>table</code>).</li>
-  <li>Trong bucket đó, chỉ xét những phần tử có <strong>hash bằng đúng</strong> hash của key.</li>
-  <li>Chỉ đến bước này mới thử <code>==</code>, rồi đến <code>equals</code>.</li>
+<h2>1 · Nhắc lại: biến kiểu object chứa gì?</h2>
+<p>Cả bài dựa trên một ý mà bạn đã gặp ở <a href="0004-string-pool.html">bài 4</a>:</p>
+<div class="analogy">
+<p>Object giống một <strong>tấm bảng</strong> treo trên tường (trong heap). Biến giống một <strong>tờ giấy</strong> ghi "tấm bảng ở ô số 7". Biến <em>không</em> chứa tấm bảng, mà chỉ chứa vị trí của nó. Vị trí đó gọi là <span class="term">tham chiếu</span> (reference).</p>
+</div>
+<pre><code>Diem a = new Diem(1, 2);   // tạo tấm bảng #1, tờ giấy a ghi "ô #1"
+Diem b = new Diem(1, 2);   // tạo tấm bảng #2, tờ giấy b ghi "ô #2"
+Diem c = a;                // tờ giấy c chép lại "ô #1", không tạo tấm bảng mới</code></pre>
+<p>Có <strong>hai</strong> tấm bảng (vì có hai lần <code>new</code>), và <strong>ba</strong> tờ giấy. <code>a</code> và <code>c</code> chỉ cùng một tấm bảng. <code>b</code> chỉ một tấm khác, chỉ là tình cờ có cùng nội dung (1, 2).</p>
+
+<h2>2 · Ba câu hỏi khác nhau</h2>
+<div class="analogy">
+<p>Bạn và một người bạn mua <strong>hai cuốn sách giống hệt nhau</strong>, cùng tên, cùng tác giả, cùng mã ISBN. Có ba câu hỏi khác nhau bạn có thể đặt ra:</p>
+<ol>
+  <li><strong>"Đây có phải là cùng MỘT cuốn sách không?"</strong> Không. Có hai cuốn riêng biệt, mỗi người cầm một cuốn.</li>
+  <li><strong>"Hai cuốn này có giống nhau về nội dung không?"</strong> Có. Cùng ISBN tức là cùng một đầu sách.</li>
+  <li><strong>"Cuốn này để ở kệ số mấy trong thư viện?"</strong> Thủ thư nhìn mã của sách để biết kệ. Hai cuốn giống nhau thì phải nằm cùng một kệ.</li>
 </ol>
-<p>P2 không override <code>hashCode</code>, nên nó dùng bản của <code>Object</code>. Bản này trả về một số gắn với <em>từng object</em> (identity hash), nên <code>a2</code> và <code>b2</code> gần như chắc chắn có hash khác nhau. Lookup bị loại ngay ở bước ① hoặc ②, và <code>equals</code> của bạn <strong>không bao giờ được gọi</strong>.</p>
+</div>
+<table>
+  <tr><th>Câu hỏi</th><th>Trong Java</th><th>Ai quyết định câu trả lời?</th></tr>
+  <tr><td>1. Có phải cùng một object không?</td><td><code>a == b</code></td><td>JVM. Nó chỉ so hai tham chiếu, bạn không thay đổi được.</td></tr>
+  <tr><td>2. Có giống nhau về nội dung không?</td><td><code>a.equals(b)</code></td><td><strong>Bạn</strong>, bằng cách override method <code>equals</code>.</td></tr>
+  <tr><td>3. Thuộc "kệ" nào?</td><td><code>a.hashCode()</code></td><td><strong>Bạn</strong>, bằng cách override method <code>hashCode</code>.</td></tr>
+</table>
+<p>Phần còn lại của bài đi lần lượt từng câu hỏi.</p>
 
-<p class="big-idea">Contract: nếu <code>a.equals(b)</code> thì <code>a.hashCode() == b.hashCode()</code> là <em>bắt buộc</em>. Chiều ngược lại thì không cần: hai object khác nhau được phép trùng hash (gọi là collision).<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html#hashCode()">[Object.hashCode Javadoc]</a></p>
+<h2>3 · <code>==</code>: "có phải cùng một object không?"</h2>
+<p><code>==</code> so sánh <strong>hai giá trị nằm trong hai biến</strong>. Nó không nhìn vào bên trong object:</p>
+<ul>
+  <li>Với số nguyên thuỷ (<code>int</code>, <code>double</code>, <code>boolean</code>...): giá trị trong biến chính là con số, nên <code>==</code> so hai con số. <code>5 == 5</code> là <code>true</code>.</li>
+  <li>Với object: giá trị trong biến là <strong>tham chiếu</strong>, nên <code>==</code> so hai tham chiếu, tức là hỏi "hai tờ giấy có ghi cùng một ô không?"</li>
+</ul>
+<pre><code>Diem a = new Diem(1, 2);
+Diem b = new Diem(1, 2);
+Diem c = a;
+a == b   // false: hai tấm bảng khác nhau, dù nội dung giống hệt
+a == c   // true : cùng một tấm bảng</code></pre>
+<p>Ở cấp độ bytecode, hai kiểu so sánh này là hai lệnh khác nhau. Bạn có thể tự xem bằng <code>javap -c Ops</code> trong <code>lab/l0003</code>:<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.21.3">[JLS §15.21.3]</a></p>
+<div class="expect"><pre><code>a == b  (kiểu Object) → if_acmpne     // "a" = reference: so hai tham chiếu
+a == b  (kiểu int)    → if_icmpne     // "i" = int: so hai số
+a.equals(b)           → invokevirtual Object.equals   // gọi một method bình thường</code></pre></div>
 
-<p>Cách sửa: dùng <code>Objects.hash(x, y)</code> trên <em>đúng các field</em> mà <code>equals</code> dùng (như P3). Hoặc dùng <code>record</code> (như P4): compiler tự sinh <code>equals</code>/<code>hashCode</code>/<code>toString</code> dựa trên mọi component.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.10.3">[JLS §8.10.3]</a></p>
+<div class="remember"><code>==</code> trên object <strong>không bao giờ</strong> nhìn vào field. Hai object tạo bằng hai lần <code>new</code> thì <code>==</code> luôn ra <code>false</code>, dù nội dung giống hệt nhau.</div>
 
-<div class="callout"><strong>Câu trả lời phỏng vấn mẫu</strong>
-"<code>==</code> so sánh tham chiếu, <code>equals</code> so sánh theo logic do class tự định nghĩa (mặc định giống <code>==</code>). HashMap/HashSet tìm bucket bằng <code>hashCode</code> trước, sau đó mới dùng <code>equals</code>. Nếu override <code>equals</code> mà không override <code>hashCode</code> thì hai object bằng nhau sẽ có hash khác nhau, và collection không tìm thấy phần tử."</div>
+<h2>4 · <code>equals</code>: "có giống nhau về nội dung không?"</h2>
 
-<h2>3 · Kiểm tra</h2>
-<div class="quiz" data-quiz="q3"></div>
-<script type="application/json" id="q3">[
- {"q":"<code>new P1(1,2) == new P1(1,2)</code> cho <code>false</code>. Phép <code>==</code> thực sự đã so sánh gì?",
-  "options":["Từng field x, y của hai object trên heap","Kết quả hashCode của hai object với nhau","Kết quả gọi equals mặc định của Object","Hai tham chiếu nằm trong hai slot khác nhau"],
-  "answer":3,"why":"Với object, <code>==</code> so hai giá trị tham chiếu (lệnh <code>if_acmpne</code>), không nhìn vào field. Hai lần <code>new</code> tạo ra hai object, nên có hai tham chiếu khác nhau."},
- {"q":"Class không override <code>equals</code>. Gọi <code>a.equals(b)</code> sẽ cho kết quả giống phép nào?",
-  "options":["Giống hệt a == b, so sánh tham chiếu","So sánh từng field bằng reflection","So sánh a.hashCode() với b.hashCode()","So sánh a.toString() với b.toString()"],
-  "answer":0,"why":"Nguyên văn trong <code>Object.java</code>: <code>return (this == obj);</code>."},
- {"q":"P2 chỉ override <code>equals</code>. Vì sao <code>set.contains(b2)</code> vẫn trả về <code>false</code>?",
-  "options":["Vì HashSet không bao giờ gọi tới equals","Vì equals của P2 viết sai cú pháp pattern","Vì hash khác nhau nên bị loại trước equals","Vì HashSet so sánh bằng == thay vì equals"],
-  "answer":2,"why":"<code>getNode</code> chọn bucket và so <code>hash</code> trước. Identity hash của <code>a2</code> và <code>b2</code> khác nhau, nên lookup dừng lại trước khi kịp gọi <code>equals</code>."},
- {"q":"Theo contract, phát biểu nào là <strong>bắt buộc</strong>?",
-  "options":["hashCode bằng nhau thì equals phải true","equals là true thì hashCode phải bằng nhau","hashCode phải khác nhau với mọi object","equals và hashCode phải dùng chung cache"],
-  "answer":1,"why":"Chỉ có chiều <code>equals → cùng hash</code> là bắt buộc. Hai object khác nhau được phép có hash trùng nhau (collision); HashMap xử lý trường hợp đó bằng cách so <code>equals</code> trong cùng bucket."},
- {"q":"(Ôn bài 1) Biểu thức nào được <code>javac</code> dịch thành lệnh <code>if_acmpne</code>?",
-  "options":["a == b khi a, b có kiểu là Object","a == b khi a, b có kiểu là int","a.equals(b) khi a, b có kiểu Object","a.hashCode() == b.hashCode()"],
-  "answer":0,"why":"Tiền tố <code>a</code> = reference, <code>i</code> = int. <code>if_acmpne</code> so hai tham chiếu; so hai <code>int</code> là <code>if_icmpne</code>; còn <code>equals</code> là <code>invokevirtual</code>."}
-]</script>
+<h3>Bản mặc định của <code>equals</code> chỉ là <code>==</code></h3>
+<p>Mọi class đều kế thừa <code>Object</code>, và <code>Object</code> có sẵn method <code>equals</code>. Đây là nguyên văn code trong JDK 21:<a class="cite" href="https://github.com/openjdk/jdk21u/blob/master/src/java.base/share/classes/java/lang/Object.java#L163-L165">[Object.java]</a></p>
+<pre><code>public boolean equals(Object obj) {
+    return (this == obj);
+}</code></pre>
+<p>Tức là nếu bạn <strong>không override</strong>, <code>equals</code> và <code>==</code> cho kết quả <strong>y hệt nhau</strong>. Java không thể tự đoán "giống nhau về nội dung" với class của bạn nghĩa là gì: hai <code>NhanVien</code> bằng nhau khi trùng mã nhân viên, hay khi trùng cả tên lẫn ngày sinh? Đó là quyết định của bạn.</p>
 
-<h2>4 · Thử thách</h2>
-<div class="lab">
-<h3>A. Key bị sửa sau khi đã vào Set</h3>
-<p><code>MutableKey.java</code>: class <code>P</code> override đúng cả <code>equals</code> và <code>hashCode</code>. Ta <code>add(p)</code> vào set, <em>sau đó</em> mới gán <code>p.x = 100</code>. Đoán 3 dòng output: <code>contains(p)</code>, <code>size</code>, và phần tử lấy ra khi duyệt set có <code>equals(p)</code> không?</p>
-<details><summary>Đáp án</summary>
-<pre><code>contains(p)   = false
-size          = 1
-iterate thấy p = true</code></pre>
-<p>Object nằm ở bucket được tính từ hash <em>cũ</em>. Sau khi sửa <code>x</code>, hash mới trỏ sang bucket khác, nên lookup tìm sai chỗ, dù object vẫn nằm trong set (duyệt set thì thấy). Lúc này bạn cũng không <code>remove</code> được nó, và đó chính là một kiểu memory leak. Bài học: field tham gia vào <code>hashCode</code> phải bất biến khi object còn nằm trong collection. Hướng sang Spring: một JPA entity tính <code>hashCode</code> từ <code>id</code> do database sinh ra sẽ đổi hash ngay sau khi persist, và gặp đúng lỗi này.</p></details>
+<h3>Tận mắt xem: 4 phiên bản của cùng một class</h3>
+<p>Mở <code>lab/l0003/Equality.java</code>. File có 4 phiên bản class điểm <code>(x, y)</code>, mỗi phiên bản tạo hai object <code>a</code> và <code>b</code> cùng là <code>(1, 2)</code>:</p>
+<table>
+  <tr><th>Phiên bản</th><th>Override gì?</th></tr>
+  <tr><td><code>P1</code></td><td>Không override gì cả</td></tr>
+  <tr><td><code>P2</code></td><td>Chỉ override <code>equals</code></td></tr>
+  <tr><td><code>P3</code></td><td>Override cả <code>equals</code> lẫn <code>hashCode</code></td></tr>
+  <tr><td><code>P4</code></td><td>Là <code>record</code> (compiler tự sinh)</td></tr>
+</table>
+<p>Với mỗi phiên bản, chương trình in ra <code>a == b</code>, <code>a.equals(b)</code>, và <code>set.contains(b)</code> khi set chỉ chứa <code>a</code>. <strong>Hãy đoán cả 12 giá trị trước</strong>, ghi ra giấy, rồi chạy:</p>
+<pre><code>cd lab/l0003
+javac Equality.java
+java Equality</code></pre>
+<div class="expect"><pre><code>P1: ==false equals=false
+P2: ==false equals=true <span class="bad-hl">set.contains=false</span>    ← lạ!
+P3: ==false equals=true set.contains=true
+P4: ==false equals=true set.contains=true</code></pre></div>
+<ul>
+  <li><strong>Cột <code>==</code>:</strong> luôn <code>false</code>, vì là hai lần <code>new</code> (mục 3).</li>
+  <li><strong>P1 <code>equals=false</code>:</strong> không override, nên <code>equals</code> chỉ là <code>==</code>.</li>
+  <li><strong>P2, P3, P4 <code>equals=true</code>:</strong> đã override, nên <code>equals</code> so theo nội dung.</li>
+  <li><strong>P2 <code>set.contains=false</code>:</strong> đã có <code>equals</code> đúng mà <code>HashSet</code> vẫn không tìm thấy. Mục 5 sẽ giải thích lý do.</li>
+</ul>
 
-<h3>B. <code>hashCode</code> luôn trả về 42</h3>
-<p><code>Const.java</code> có <code>record K(int v)</code> override <code>hashCode() { return 42; }</code>. Trả lời hai câu: (1) Cách này có vi phạm contract không? (2) Set có chạy <em>đúng</em> không, và có chạy <em>nhanh</em> không? Đoán xong thì chạy <code>javac Const.java &amp;&amp; java Const</code>.</p>
-<details><summary>Đáp án</summary>
-<p>Không vi phạm contract: object bằng nhau vẫn có hash bằng nhau. Kết quả vẫn đúng (<code>contains = true</code>). Nhưng mọi phần tử dồn vào <em>một</em> bucket, nên mỗi lookup phải so <code>equals</code> với gần như cả set. Trên máy này, 20 000 lần add + contains mất <strong>~9 ms với hash tốt</strong> so với <strong>~2 100 ms với hash = 42</strong>, chậm hơn ~230 lần. Đúng contract mới là điều kiện tối thiểu; hash còn phải <em>phân tán đều</em> thì mới nhanh.</p></details>
+<h3>Cách viết một <code>equals</code> đúng</h3>
+<p>Ví dụ class <code>Sach</code>, coi hai cuốn là bằng nhau khi trùng mã <code>isbn</code>. Đi từng dòng:</p>
+<pre><code>@Override
+public boolean equals(Object o) {
+    if (this == o) return true;                    // ① cùng một object thì chắc chắn bằng nhau
+    if (!(o instanceof Sach other)) return false;  // ② null hoặc không phải Sach thì không bằng
+    return isbn.equals(other.isbn);                // ③ so các field quyết định "bằng nhau"
+}</code></pre>
+<ol class="flow">
+  <li><strong>① Lối tắt:</strong> nếu là cùng một object thì khỏi so sánh gì nữa.</li>
+  <li><strong>② Kiểm tra kiểu:</strong> tham số có kiểu <code>Object</code>, nên người ta có thể truyền vào bất cứ thứ gì, kể cả <code>null</code> hay một <code>String</code>. <code>instanceof</code> trả về <code>false</code> với <code>null</code>, nên dòng này lo luôn trường hợp đó. Phần <code>Sach other</code> (pattern matching, Java 16+) vừa kiểm tra kiểu vừa ép kiểu.</li>
+  <li><strong>③ So field:</strong> chỉ so những field quyết định "hai cái là một". Nhớ dùng <code>.equals</code> để so field kiểu object như <code>String</code> (bài 4), và <code>==</code> cho field kiểu số nguyên thuỷ.</li>
+</ol>
+<p>Lưu ý: tham số phải có kiểu <code>Object</code>. Nếu viết <code>equals(Sach o)</code> thì bạn đang tạo một method <em>khác</em> (overload) chứ không phải override, và <code>HashSet</code> sẽ không bao giờ gọi tới nó. Chú thích <code>@Override</code> giúp <code>javac</code> bắt lỗi này cho bạn.</p>
+
+<h2>5 · <code>hashCode</code>: "thuộc kệ nào?"</h2>
+
+<div class="analogy">
+<p>Thư viện có <strong>hàng nghìn kệ</strong>. Nếu mỗi lần tìm sách mà phải lục từng kệ thì quá chậm. Vì vậy mỗi cuốn sách có một <strong>mã số</strong>, và từ mã số đó tính ra số kệ. Cất sách thì cất vào đúng kệ đó. Tìm sách thì tính mã, đi thẳng tới kệ, rồi chỉ cần so vài cuốn trên kệ.</p>
+</div>
+<p><code>hashCode()</code> chính là "mã số" đó: một con số <code>int</code> tính từ object. <code>HashSet</code> và <code>HashMap</code> dùng nó để chọn "kệ" (gọi là <span class="term">bucket</span>). Bạn sẽ học kỹ bên trong ở <a href="0011-hashmap-ben-trong.html">bài 11</a>. Ở đây chỉ cần biết thứ tự hai bước khi <code>HashSet</code> tìm một phần tử:</p>
+<ol class="flow">
+  <li>Gọi <code>hashCode()</code> để <strong>chọn kệ</strong>. Chỉ xét những phần tử ở kệ đó, có hash trùng khớp.</li>
+  <li>Trong kệ đó, gọi <code>equals()</code> để tìm đúng phần tử.</li>
+</ol>
+<p><strong>Bước 1 xảy ra trước.</strong> Nếu bước 1 đi sai kệ thì <code>equals</code> không bao giờ được gọi tới.</p>
+
+<h3>Vì sao P2 không tìm thấy?</h3>
+<p><code>P2</code> override <code>equals</code> nhưng <strong>không</strong> override <code>hashCode</code>, nên dùng bản mặc định của <code>Object</code>. Bản mặc định trả về một con số gắn với <strong>từng object riêng</strong> (gọi là <span class="term">identity hash</span>), không liên quan gì tới nội dung. Xem tận mắt với <code>HashValues.java</code>:</p>
+<pre><code>javac HashValues.java
+java HashValues</code></pre>
+<div class="expect"><pre><code>P2: equals=true  hashCode a=<span class="bad-hl">366712642</span>  b=<span class="bad-hl">1829164700</span>
+P3: equals=true  hashCode a=994  b=994</code></pre>
+<p style="margin:0">(Số của P2 trên máy bạn sẽ khác, nhưng chắc chắn hai số khác nhau.)</p></div>
+<ul>
+  <li><strong>P2:</strong> <code>equals</code> nói "bằng nhau", nhưng hai mã số khác hẳn nhau, nên <code>HashSet</code> đi tìm ở <strong>sai kệ</strong>, không thấy, và trả về <code>false</code>. <code>equals</code> của bạn không hề được gọi.</li>
+  <li><strong>P3:</strong> <code>hashCode()</code> được override bằng <code>Objects.hash(x, y)</code>, tính từ chính các field mà <code>equals</code> dùng. Hai object bằng nhau thì có cùng mã 994, nên vào đúng kệ và tìm thấy.</li>
+</ul>
+
+<h2>6 · Hợp đồng (contract) giữa <code>equals</code> và <code>hashCode</code></h2>
+<p>Javadoc của <code>Object</code> quy định rõ mối quan hệ giữa hai method này:<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html#hashCode()">[Object.hashCode Javadoc]</a></p>
+<table>
+  <tr><th>Nếu…</th><th>…thì</th><th>Bắt buộc?</th></tr>
+  <tr><td><code>a.equals(b)</code> là <code>true</code></td><td><code>a.hashCode() == b.hashCode()</code></td><td><strong>Bắt buộc.</strong> Sách giống nhau phải nằm cùng kệ.</td></tr>
+  <tr><td><code>a.hashCode() == b.hashCode()</code></td><td><code>a.equals(b)</code> là <code>true</code></td><td><strong>Không bắt buộc.</strong> Một kệ có thể chứa nhiều cuốn khác nhau (gọi là <span class="term">collision</span>).</td></tr>
+  <tr><td><code>a.equals(b)</code> là <code>false</code></td><td>hashCode khác nhau</td><td>Không bắt buộc, nhưng khác nhau càng nhiều thì càng nhanh.</td></tr>
+</table>
+
+<div class="remember">
+<strong>Quy tắc vàng:</strong> override <code>equals</code> thì <strong>bắt buộc</strong> override <code>hashCode</code>, và cả hai phải dùng <strong>cùng một nhóm field</strong>.<br>
+Cách đơn giản nhất: <code>Objects.hash(field1, field2, ...)</code>, hoặc dùng <code>record</code> để compiler tự sinh cả hai.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.10.3">[JLS §8.10.3]</a>
 </div>
 
+<pre><code>// Cách 1: tự viết
+@Override public int hashCode() { return Objects.hash(x, y); }
+
+// Cách 2: record. Compiler tự sinh equals, hashCode và toString theo mọi field
+record Diem(int x, int y) { }</code></pre>
+
+<h2>7 · Bẫy thật khi đi làm: sửa object đã nằm trong <code>HashSet</code></h2>
+<p>Mở <code>MutableKey.java</code>. Class <code>P</code> đã override <strong>đúng</strong> cả <code>equals</code> và <code>hashCode</code>. Code bỏ <code>p</code> vào set, rồi <strong>sau đó</strong> mới sửa <code>p.x = 100</code>:</p>
+<pre><code>P p = new P(1, 2);
+Set&lt;P&gt; set = new HashSet&lt;&gt;();
+set.add(p);
+p.x = 100;                       // sửa key SAU khi đã cho vào set</code></pre>
+<p><strong>Đoán trước:</strong> <code>set.contains(p)</code> ra <code>true</code> hay <code>false</code>? <code>set.size()</code> bằng bao nhiêu?</p>
+<pre><code>javac MutableKey.java
+java MutableKey</code></pre>
+<div class="expect"><pre><code>contains(p)   = <span class="bad-hl">false</span>
+size          = 1
+iterate thấy p = true</code></pre></div>
+<p>Cùng một object <code>p</code>, nhưng <code>contains(p)</code> lại ra <code>false</code>!</p>
+<ol class="flow">
+  <li>Lúc <code>add</code>, <code>p</code> là (1, 2). Hash tính từ (1, 2), và <code>p</code> được cất ở <strong>kệ A</strong>.</li>
+  <li>Sửa <code>x = 100</code>. Bây giờ <code>p</code> là (100, 2), nên hash mới chỉ tới <strong>kệ B</strong>.</li>
+  <li><code>contains(p)</code> đi tìm ở kệ B, trong khi <code>p</code> vẫn nằm ở kệ A, nên không thấy. Duyệt cả set thì vẫn thấy <code>p</code> (<code>size = 1</code>), nhưng bạn cũng không <code>remove</code> nó được nữa. Đây là một dạng memory leak (<a href="0009-gc-don-rac.html">bài 9</a>).</li>
+</ol>
+<p>Ngoài đời: một JPA entity tính <code>hashCode</code> từ <code>id</code>, mà <code>id</code> do database sinh ra. Trước khi lưu, <code>id = null</code>. Sau khi lưu, <code>id</code> có giá trị, hash đổi, và entity "biến mất" khỏi <code>HashSet</code> đang chứa nó.</p>
+
+<div class="remember">Field dùng trong <code>hashCode</code> <strong>không được thay đổi</strong> khi object đang nằm trong <code>HashSet</code> hay là key của <code>HashMap</code>. Cách an toàn nhất: dùng object <strong>bất biến</strong> làm key (<code>String</code>, <code>record</code> có field bất biến, xem <a href="0016-final.html">bài 16</a>).</div>
+
+<div class="callout"><strong>Câu phỏng vấn: "Phân biệt ==, equals và hashCode. Vì sao override equals phải override hashCode?"</strong>
+<p><em>"<code>==</code> so sánh hai giá trị trong biến: với primitive là so số, với object là so tham chiếu, tức là hỏi có phải cùng một object không. <code>equals</code> là method so sánh theo nội dung do class tự định nghĩa; bản mặc định trong <code>Object</code> chỉ là <code>this == obj</code>. <code>hashCode</code> trả về một số nguyên mà HashMap/HashSet dùng để chọn bucket. Contract: hai object <code>equals</code> nhau thì bắt buộc cùng <code>hashCode</code>, còn chiều ngược lại thì không. HashSet tìm bucket bằng <code>hashCode</code> trước rồi mới gọi <code>equals</code>. Nếu chỉ override <code>equals</code> thì hai object bằng nhau có hash khác nhau, nằm ở bucket khác nhau, nên <code>contains</code>/<code>get</code> trả về sai. Ngoài ra, không được sửa field dùng trong <code>hashCode</code> khi object đang nằm trong collection."</em></p></div>
+
+<h2>8 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q3"></div>
+<script type="application/json" id="q3">[
+ {"q":"<code>Diem a = new Diem(1,2); Diem b = new Diem(1,2);</code> Class <code>Diem</code> không override gì. <code>a.equals(b)</code> ra gì, và vì sao?",
+  "options":["true, vì hai object có cùng field","false, vì equals mặc định chỉ là ==","true, vì Java tự so từng field","Lỗi biên dịch vì chưa viết equals"],
+  "answer":1,"why":"Bản mặc định trong <code>Object</code> là <code>return (this == obj);</code>. Không override thì <code>equals</code> y hệt <code>==</code>, mà <code>a</code> và <code>b</code> là hai object khác nhau."},
+ {"q":"<code>==</code> giữa hai biến kiểu object thực sự so sánh cái gì?",
+  "options":["Từng field bên trong hai object","Kết quả hashCode của hai object","Kết quả equals do bạn đã viết","Hai tham chiếu, tức có cùng object không"],
+  "answer":3,"why":"Với object, giá trị trong biến là tham chiếu, nên <code>==</code> (lệnh <code>if_acmpne</code>) so hai tham chiếu, không nhìn vào field."},
+ {"q":"Class chỉ override <code>equals</code>, không override <code>hashCode</code>. Set chứa <code>a</code>, và <code>a.equals(b)</code> là true. <code>set.contains(b)</code> gần như luôn ra gì?",
+  "options":["false, vì hash khác nên tìm sai bucket","true, vì equals đã được override đúng","true, vì HashSet chỉ dùng equals","Ném lỗi vì thiếu method hashCode"],
+  "answer":0,"why":"HashSet chọn bucket bằng <code>hashCode</code> trước. Identity hash của <code>a</code> và <code>b</code> khác nhau, nên tìm sai bucket và <code>equals</code> không bao giờ được gọi."},
+ {"q":"Theo contract, phát biểu nào là <strong>bắt buộc</strong>?",
+  "options":["Cùng hashCode thì equals phải ra true","Khác nhau thì hashCode phải khác nhau","equals ra true thì hashCode phải bằng nhau","hashCode phải đổi khi object thay đổi"],
+  "answer":2,"why":"Chỉ có chiều \"equals → cùng hashCode\" là bắt buộc. Hai object khác nhau được phép trùng hashCode (collision)."},
+ {"q":"(Ôn bài 6) Trong <code>equals(Object o)</code>, dòng <code>if (this == o) return true;</code> dùng <code>this</code> để chỉ gì?",
+  "options":["Class Object, là class cha của mọi class","Object đang chạy method, bên trái dấu chấm","Tham số o vừa được truyền vào method","Bản equals mặc định của class cha"],
+  "answer":1,"why":"Với <code>a.equals(b)</code> thì <code>this</code> là <code>a</code>, và JVM truyền nó ngầm vào slot 0. Dòng này là lối tắt: cùng một object thì chắc chắn bằng nhau."}
+]</script>
+
+<h2>9 · Thử thách</h2>
+<div class="lab">
+<h3>A. Tự viết <code>equals</code> và <code>hashCode</code></h3>
+<p>Viết class <code>Sach</code> có hai field <code>isbn</code> và <code>ten</code>. Hai cuốn sách được coi là <strong>bằng nhau khi trùng <code>isbn</code></strong>, kể cả khi tên khác nhau (ví dụ một bản in lại). Sau đó kiểm tra:</p>
+<pre><code>Sach s1 = new Sach("978-0134685991", "Effective Java");
+Sach s2 = new Sach("978-0134685991", "Effective Java (bản in lại)");
+Set&lt;Sach&gt; kho = new HashSet&lt;&gt;(List.of(s1));
+// Mong muốn: s1.equals(s2) == true, kho.contains(s2) == true,
+//            s1.equals(null) == false, s1.equals("abc") == false</code></pre>
+<details><summary>Xem lời giải</summary>
+<pre><code>@Override
+public boolean equals(Object o) {
+    if (this == o) return true;
+    if (!(o instanceof Sach other)) return false;
+    return isbn.equals(other.isbn);
+}
+
+@Override
+public int hashCode() { return isbn.hashCode(); }   // CÙNG field với equals</code></pre>
+<div class="expect"><pre><code>equals=true sameHash=true contains=true
+equals(null)=false equals("abc")=false</code></pre></div>
+<p>Điểm mấu chốt: <code>hashCode</code> chỉ dùng <code>isbn</code>, giống hệt <code>equals</code>. Nếu bạn viết <code>Objects.hash(isbn, ten)</code> thì hai cuốn khác tên sẽ có hash khác nhau, vi phạm contract, và <code>contains</code> sẽ ra <code>false</code>.</p>
+</details>
+
+<h3>B. <code>hashCode</code> luôn trả về 42</h3>
+<p><code>Const.java</code> có <code>record K(int v)</code> với <code>hashCode()</code> luôn trả về 42. Trả lời hai câu: (1) Cách này có vi phạm contract không? (2) <code>HashSet</code> có chạy <em>đúng</em> không, và có chạy <em>nhanh</em> không?</p>
+<pre><code>javac Const.java
+java Const</code></pre>
+<details><summary>Xem đáp án</summary>
+<div class="expect"><pre><code>contains(new K(2)) = true, size = 2
+hash tốt: 8 ms, hash = 42: 1917 ms</code></pre></div>
+<p>(1) Không vi phạm: object bằng nhau vẫn cùng hash. (2) Chạy <strong>đúng</strong>, nhưng chậm hơn khoảng <strong>240 lần</strong>, vì mọi phần tử dồn vào cùng một "kệ", nên mỗi lần tìm phải so <code>equals</code> với gần như toàn bộ set. Đúng contract mới là điều kiện tối thiểu. Hash còn phải <strong>phân tán đều</strong> thì mới nhanh.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: 5 tính chất mà mọi <code>equals</code> phải thoả</summary>
+<p>Javadoc của <code>Object.equals</code> yêu cầu <code>equals</code> phải:<a class="cite" href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html#equals(java.lang.Object)">[Object.equals Javadoc]</a></p>
+<ul>
+  <li><strong>Phản xạ (reflexive):</strong> <code>x.equals(x)</code> luôn <code>true</code>.</li>
+  <li><strong>Đối xứng (symmetric):</strong> <code>x.equals(y)</code> thì <code>y.equals(x)</code>.</li>
+  <li><strong>Bắc cầu (transitive):</strong> <code>x</code> bằng <code>y</code>, <code>y</code> bằng <code>z</code> thì <code>x</code> bằng <code>z</code>.</li>
+  <li><strong>Nhất quán (consistent):</strong> gọi nhiều lần vẫn ra cùng kết quả, nếu object không đổi.</li>
+  <li><strong>Với null:</strong> <code>x.equals(null)</code> luôn <code>false</code>.</li>
+</ul>
+<p>Mẫu ở mục 4 thoả cả 5 tính chất. Lỗi hay gặp nhất là phá tính <strong>đối xứng</strong>, khi class cha và class con so sánh lẫn nhau theo hai cách khác nhau. Vì vậy với class dữ liệu, <code>record</code> (là <code>final</code>, không có class con) là lựa chọn an toàn nhất.</p>
+</details>
+
 <hr>
-<h2>Đọc thêm (nguồn chính)</h2>
-<p><a href="https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/"><em>Effective Java</em> (3rd ed.), Joshua Bloch: Item 10 "Obey the general contract when overriding equals" và Item 11 "Always override hashCode when you override equals"</a>. Bloch là người thiết kế Java Collections Framework. Đọc thêm <a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html#equals(java.lang.Object)">Javadoc của <code>Object.equals</code></a> để biết 5 tính chất (reflexive, symmetric, transitive, consistent, non-null) mà mọi <code>equals</code> phải thoả.</p>
+<h2>Đọc thêm</h2>
+<p><em>Effective Java</em> (3rd ed.), Joshua Bloch, Item 10 "Obey the general contract when overriding equals" và Item 11 "Always override hashCode when you override equals". Bloch là người thiết kế Java Collections Framework, và đây là tài liệu kinh điển về chủ đề này. Javadoc của <a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html#equals(java.lang.Object)"><code>Object.equals</code></a> và <a href="https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html#hashCode()"><code>Object.hashCode</code></a> ghi định nghĩa chính thức. Muốn hiểu bên trong <code>HashMap</code> thì đọc <a href="0011-hashmap-ben-trong.html">bài 11</a>.</p>
 
-<p class="ask">Có chỗ nào chưa rõ? Cứ hỏi agent (giáo viên của bạn). Thử tự giải thích bằng lời (gửi cho agent để được nhận xét): <em>vì sao <code>"hi" == "hi"</code> lại cho <code>true</code>, trong khi <code>new String("hi") == new String("hi")</code> cho <code>false</code>?</em> Đó chính là chủ đề bài 4: String pool.</p>
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "vì sao không so mọi field trong equals cho chắc?", "dùng getClass() hay instanceof trong equals?", "Lombok @EqualsAndHashCode có an toàn với JPA entity không?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
 
-<div class="footer-nav"><a href="0002-stack-heap-pass-by-value.html">← Bài 2: Stack, heap, pass-by-value</a><a href="0004-string-pool.html">Bài 4: String pool →</a></div>
+<div class="footer-nav"><a href="0002-stack-heap-pass-by-value.html">← Bài 2: Stack, heap, metaspace, pass-by-value</a><a href="0004-string-pool.html">Bài 4: String pool →</a></div>
 
 <script src="../assets/quiz.js"></script>
 </body>

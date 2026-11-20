@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lộ trình Java Core</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Lộ trình Java Core</h1>
+<p class="subtitle">Thứ tự học 23 bài đã có, và những gì còn phải học để hoàn thành mục tiêu</p>
+<div class="meta"><span>Cập nhật: 2026-11-20</span><span><a href="glossary.html">Glossary</a></span></div>
+
+<div class="callout"><p><strong>Cách dùng:</strong> học theo đúng số thứ tự bài (1 → 23); thứ tự đã được sắp sao cho mọi bài "Cần biết"/"Ôn" đều nằm trước. Mỗi bài mở đầu bằng phần "Ôn" về bài cũ, nên đừng nhảy cóc. Sau mỗi <em>phần</em>, hãy làm lại quiz của các bài trong phần đó mà không xem lại bài (đây là cách nhớ lâu nhất), rồi gửi kết quả cho agent.</p></div>
+
+<h2>Phần A · Đã có (23 bài)</h2>
+<table>
+<tr><th>Phần</th><th>Bài</th><th>Học được kỹ năng gì</th></tr>
+<tr><td rowspan="2"><strong>1. Java chạy thế nào</strong></td><td><a href="../lessons/0001-tu-source-den-bytecode.html">1 · Từ source đến bytecode</a></td><td>Đọc bytecode bằng <code>javap</code></td></tr>
+<tr><td><a href="../lessons/0002-stack-heap-pass-by-value.html">2 · Stack, heap, metaspace, pass-by-value</a></td><td>Vẽ được bộ nhớ, trả lời câu "Java truyền tham chiếu hay giá trị"</td></tr>
+<tr><td rowspan="2"><strong>2. Object và so sánh</strong></td><td><a href="../lessons/0003-equals-hashcode.html">3 · ==, equals, hashCode</a></td><td>Viết đúng equals/hashCode</td></tr>
+<tr><td><a href="../lessons/0004-string-pool.html">4 · String pool</a></td><td>Giải thích <code>"hi" == "hi"</code>, Integer cache</td></tr>
+<tr><td rowspan="3"><strong>3. Class và OOP dưới góc JVM</strong></td><td><a href="../lessons/0005-static-chay-khi-nao.html">5 · Static chạy khi nào</a></td><td>Dự đoán thứ tự khởi tạo cha–con</td></tr>
+<tr><td><a href="../lessons/0006-this-super.html">6 · this và super</a></td><td>Tránh bẫy gọi method override trong constructor</td></tr>
+<tr><td><a href="../lessons/0007-overriding-overloading.html">7 · Overloading và Overriding</a></td><td>Đoán đúng compiler/JVM chọn method nào</td></tr>
+<tr><td rowspan="2"><strong>4. JVM lúc chạy</strong></td><td><a href="../lessons/0008-jit-warm-up.html">8 · JIT và warm-up</a></td><td>Đo hiệu năng không bị lừa</td></tr>
+<tr><td><a href="../lessons/0009-gc-don-rac.html">9 · GC dọn rác</a></td><td>Đọc GC log, nhận ra memory leak</td></tr>
+<tr><td rowspan="2"><strong>5. Collections</strong></td><td><a href="../lessons/0010-arraylist-ben-trong.html">10 · ArrayList bên trong</a></td><td>Chọn đúng List/Set/Deque</td></tr>
+<tr><td><a href="../lessons/0011-hashmap-ben-trong.html">11 · HashMap bên trong</a></td><td>Giải thích bucket, resize, collision</td></tr>
+<tr><td rowspan="5"><strong>6. Đa luồng</strong></td><td><a href="../lessons/0012-race-condition.html">12 · Race condition</a></td><td>Sửa bằng synchronized / Atomic / ConcurrentHashMap</td></tr>
+<tr><td><a href="../lessons/0013-deadlock-thread-dump.html">13 · Deadlock và thread dump</a></td><td>Chụp và đọc thread dump bằng <code>jcmd</code></td></tr>
+<tr><td><a href="../lessons/0014-volatile-jmm.html">14 · Volatile và JMM</a></td><td>Nhận ra lỗi visibility, happens-before</td></tr>
+<tr><td><a href="../lessons/0015-thread-pool.html">15 · Thread pool</a></td><td>Dùng ExecutorService đúng cách, virtual thread</td></tr>
+<tr><td><a href="../lessons/0016-final.html">16 · Từ khoá final</a></td><td>Viết class bất biến, hiểu final trong JMM</td></tr>
+<tr><td rowspan="3"><strong>7. Cầu nối Spring</strong></td><td><a href="../lessons/0017-proxy-va-reflection.html">17 · Proxy và reflection</a></td><td>Hiểu vì sao <code>@Transactional</code> "không chạy"</td></tr>
+<tr><td><a href="../lessons/0018-interface-abstract-access.html">18 · Interface, abstract class, access modifier</a></td><td>Chọn interface hay abstract class; thuộc 4 mức truy cập</td></tr>
+<tr><td><a href="../lessons/0019-exception.html">19 · Exception</a></td><td>Checked vs unchecked (rollback Spring), finally, try-with-resources, đọc log khi stack trace biến mất</td></tr>
+<tr><td rowspan="4"><strong>8. Ngôn ngữ nâng cao</strong></td><td><a href="../lessons/0020-generics.html">20 · Generics và type erasure</a></td><td>Giải thích erasure; viết chữ ký <code>? extends</code>/<code>? super</code> theo PECS</td></tr>
+<tr><td><a href="../lessons/0021-lambda-stream.html">21 · Lambda và Stream</a></td><td>Chứng minh lambda dùng invokedynamic; đoán thứ tự stream lười; tránh bẫy parallel</td></tr>
+<tr><td><a href="../lessons/0022-inner-vs-static-nested.html">22 · Inner class vs static nested</a></td><td>Thấy <code>this$0</code> bằng javap; sửa rò rỉ bộ nhớ do inner class/listener</td></tr>
+<tr><td><a href="../lessons/0023-comparator-treemap-cme.html">23 · Comparator, TreeMap, LinkedHashMap, CME</a></td><td>Comparator nhiều tiêu chí; chọn đúng Map theo thứ tự; xoá phần tử khi duyệt đúng cách</td></tr>
+</table>
+<p><em>Vì sao bài <code>final</code> nằm trong phần Đa luồng?</em> Nửa sau của bài đó nói về <code>final</code> trong đa luồng (JLS §17.5), nên cần học xong bài 12–15 trước. <em>Vì sao interface nằm sau proxy?</em> Bài 18 dùng JDK dynamic proxy (bài 17) để giải thích vì sao Spring bean hay có interface.</p>
+
+<h2>Phần B · Còn phải học</h2>
+<p>Xếp theo mức độ cần thiết cho mục tiêu của bạn (<a href="../MISSION.md">MISSION.md</a>): phỏng vấn, nền cho Spring, debug production. Mỗi dòng dự kiến là một bài.</p>
+
+<h3>Ưu tiên 1 · Đã học xong ✔</h3>
+<p>Toàn bộ chủ đề ưu tiên 1 (Exception, interface/abstract, Generics, Lambda/Stream, inner class, Comparator/TreeMap) đã có bài: 18–23.</p>
+
+<h3>Ưu tiên 2 · Debug production và hiểu Spring sâu hơn</h3>
+<table>
+<tr><th>Chủ đề</th><th>Vì sao cần</th></tr>
+<tr><td><strong>ClassLoader hierarchy</strong>, parent delegation</td><td>Spring Boot fat jar, lỗi <code>ClassNotFoundException</code> / <code>NoClassDefFoundError</code>, leak Metaspace (bài 2).</td></tr>
+<tr><td><strong>ThreadLocal</strong> và leak trong thread pool</td><td>Spring lưu transaction, security context trong ThreadLocal. Quên dọn thì dữ liệu "lọt" sang request khác.</td></tr>
+<tr><td><strong>CompletableFuture</strong>, ReentrantLock, CountDownLatch, Semaphore</td><td>Gọi nhiều service song song, giới hạn số kết nối. Hoàn thiện phần đa luồng.</td></tr>
+<tr><td><strong>Phân tích heap dump</strong> (Eclipse MAT) và <strong>Java Flight Recorder</strong> (<code>jcmd JFR.start</code>)</td><td>Bài 9 mới chụp heap dump, chưa đọc. JFR là công cụ profiling có sẵn trong JDK, dùng được trên production.</td></tr>
+<tr><td><strong>Weak/Soft reference</strong>, các loại <code>OutOfMemoryError</code></td><td>Hiểu cache tự giải phóng, phân biệt OOM heap / Metaspace / "unable to create native thread".</td></tr>
+<tr><td><strong>GC collector</strong>: G1 vs ZGC, tinh chỉnh cơ bản</td><td>Chọn collector khi gặp pause dài. Nối tiếp bài 9.</td></tr>
+</table>
+
+<h3>Ưu tiên 3 · Nên biết, học khi cần</h3>
+<ul>
+  <li><strong>Java hiện đại</strong>: record, enum (EnumMap, singleton), sealed class, pattern matching cho <code>switch</code> (Java 21).</li>
+  <li><strong>java.time</strong>: <code>Instant</code>, <code>LocalDateTime</code>, múi giờ. Lỗi giờ giấc rất hay gặp trong backend.</li>
+  <li><strong>I/O</strong>: <code>java.io</code> vs NIO, charset/encoding (UTF-8), đọc file lớn.</li>
+  <li><strong>Serialization</strong> và rủi ro bảo mật của nó; <strong>JPMS</strong> (module), chỉ cần biết ở mức đọc hiểu.</li>
+</ul>
+
+<h3>Rất nên làm: ôn tập tổng hợp</h3>
+<p>Bạn đã học 23 bài nhưng chưa gửi kết quả quiz hay lời giải thử thách nào. Agent vì vậy chưa biết phần nào bạn đã vững, phần nào chưa. Một bài <strong>ôn tập trộn</strong> (câu hỏi từ nhiều bài xen kẽ, kèm vài tình huống production giả lập như "app treo", "OOM", "<code>@Transactional</code> không rollback") sẽ giúp nhớ lâu hơn nhiều so với học thêm bài mới, và cho agent biết nên dạy gì tiếp.</p>
+
+<div class="remember">Gợi ý thứ tự tiếp theo: <strong>ôn tập tổng hợp</strong>, rồi chuyển sang Ưu tiên 2. Đối chiếu với lộ trình chính thức của Oracle: <a href="https://dev.java/learn/">dev.java/learn</a>.</div>
+
+<p class="ask">Muốn đổi thứ tự, bỏ bớt, hay thêm chủ đề? Cứ nói với agent. Ví dụ: "tôi sắp phỏng vấn, ưu tiên câu hay hỏi", hoặc "tôi đang gặp lỗi OOM trên production".</p>
+
+<div class="footer-nav"><a href="glossary.html">← Glossary</a><a href="../lessons/0001-tu-source-den-bytecode.html">Bài 1: Từ source đến bytecode →</a></div>
+</body>
+</html>

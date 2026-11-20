@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inner class vs static nested</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Inner class vs static nested class: sợi dây vô hình</h1>
+<p class="subtitle">Bài 22 · Một chữ <code>static</code> quyết định class con bên trong có ngầm giữ object bên ngoài hay không, và vì sao điều đó gây rò rỉ bộ nhớ</p>
+<div class="meta"><span>~35 phút</span><span>Cần biết: <a href="0006-this-super.html">Bài 6</a> (this ẩn), <a href="0009-gc-don-rac.html">Bài 9</a> (GC, rò rỉ), <a href="0021-lambda-stream.html">Bài 21</a> (lambda)</span><span>Thư mục thực hành: <code>lab/l0022</code></span></div>
+
+<p><strong>Học xong bài này, bạn sẽ:</strong></p>
+<ul>
+  <li>Phân biệt static nested class và inner class bằng một câu, và chứng minh bằng <code>javap</code>.</li>
+  <li>Thấy tận mắt inner class gây rò rỉ bộ nhớ thế nào, và sửa nó.</li>
+  <li>Biết mặc định nên chọn loại nào, và khi nào inner class thật sự cần.</li>
+</ul>
+
+<h2>1 · Ôn bài 6 và bài 9 (trả lời trong đầu trước)</h2>
+<div class="callout">
+<p>(a) Method thường khai báo 1 tham số, nhưng <code>javap</code> báo <code>args_size=2</code>. Tham số ẩn đó là gì?</p>
+<p>(b) Một object còn được một field <code>static</code> trỏ tới (trực tiếp hoặc qua nhiều bước) thì GC có dọn nó không?</p>
+<details><summary>Kiểm tra</summary>(a) <code>this</code>, được JVM truyền ngầm vào slot 0. (b) Không. Field static là một <strong>GC root</strong>, và mọi thứ "với tới được" từ root đều được giữ lại. Hôm nay bạn gặp một tham chiếu ẩn khác, tên là <code>this$0</code>, và nó kéo theo đúng hậu quả ở câu (b).</details></div>
+
+<h2>2 · Hai loại class nằm bên trong class</h2>
+<div class="analogy">
+<p><strong>Static nested class giống một cửa hàng thuê mặt bằng trong trung tâm thương mại.</strong> Nó nằm <em>trong</em> toà nhà (để dễ tìm, cùng một địa chỉ), nhưng là một doanh nghiệp độc lập, không phụ thuộc vào một gian hàng cụ thể nào.</p>
+<p><strong>Inner class giống một nhân viên của một quán cụ thể.</strong> Mỗi nhân viên luôn thuộc về <em>một</em> quán, và đeo một sợi dây (thẻ nhân viên) nối về quán đó. Nhờ sợi dây, nhân viên biết quán mình tên gì, menu ra sao. Nhưng còn nhân viên thì quán đó cũng còn "tồn tại trên giấy tờ".</p>
+</div>
+<p><code>HaiLoai.java</code> có cả hai loại:</p>
+<pre><code>public class HaiLoai {
+    String tenQuan = "Cà phê Sáng";
+
+    static class Nested {                       // static nested: không gắn với object HaiLoai nào
+        String chao() { return "Nested: xin chào"; }
+    }
+
+    class Inner {                               // inner: luôn gắn với MỘT object HaiLoai
+        String chao() { return "Inner: chào từ " + tenQuan; }   // đọc field của object ngoài
+    }
+}
+
+HaiLoai.Nested n = new HaiLoai.Nested();        // tạo thẳng, không cần object ngoài
+HaiLoai quan = new HaiLoai();
+HaiLoai.Inner i = quan.new Inner();              // phải có object ngoài mới tạo được
+quan.tenQuan = "Cà phê Tối";                     // đổi tên quán sau khi đã tạo i</code></pre>
+<pre><code>cd lab/l0022
+javac HaiLoai.java
+java HaiLoai</code></pre>
+<div class="expect"><pre><code>Nested: xin chào
+Inner: chào từ Cà phê Sáng
+Inner: chào từ <span class="hl">Cà phê Tối</span>
+Constructor của Inner:  [<span class="hl">HaiLoai$Inner(HaiLoai)</span>]
+Constructor của Nested: [HaiLoai$Nested()]</code></pre></div>
+<ul>
+  <li>Cú pháp lạ <code>quan.new Inner()</code> nói rõ: "tạo một Inner <em>thuộc về</em> <code>quan</code>".</li>
+  <li><code>i</code> thấy tên quán đổi thành "Cà phê Tối", nghĩa là nó không chép tên lúc tạo, mà <strong>giữ tham chiếu</strong> tới chính object <code>quan</code>.</li>
+  <li>Constructor của <code>Inner</code> nhận một tham số <code>HaiLoai</code> mà bạn không hề viết. Giống <code>this</code> ở bài 6: compiler tự thêm vào.</li>
+</ul>
+
+<h2>3 · Sợi dây tên là <code>this$0</code></h2>
+<p>Xem compiler đã thêm gì vào hai class:</p>
+<pre><code>javap -p 'HaiLoai$Inner'
+javap -p 'HaiLoai$Nested'</code></pre>
+<div class="expect"><pre><code>class HaiLoai$Inner {
+  <span class="hl">final HaiLoai this$0;</span>
+  HaiLoai$Inner(HaiLoai);
+  java.lang.String chao();
+}
+class HaiLoai$Nested {
+  HaiLoai$Nested();
+  java.lang.String chao();
+}</code></pre></div>
+<p>Inner class có thêm một field ẩn <code>this$0</code> trỏ tới object bên ngoài. Đó là "sợi dây". Khi bạn viết <code>tenQuan</code> trong <code>Inner</code>, compiler hiểu là <code>this$0.tenQuan</code>.<a class="cite" href="https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.1.3">[JLS §8.1.3]</a> Static nested class thì không có sợi dây nào.</p>
+<p>Hệ quả: hai lỗi biên dịch đối xứng nhau.</p>
+<pre><code>javac loi/NestedDocField.java      # static nested đọc field của object ngoài
+javac loi/NewInnerTuStatic.java    # new Inner() bên trong main (static)</code></pre>
+<div class="expect"><pre><code>loi/NestedDocField.java:4: error: <span class="hl">non-static variable tenQuan cannot be referenced from a static context</span>
+loi/NewInnerTuStatic.java:4: error: <span class="hl">non-static variable this cannot be referenced from a static context</span></code></pre></div>
+<ul>
+  <li>Static nested không có sợi dây, nên không biết đọc <code>tenQuan</code> của quán nào.</li>
+  <li><code>new Inner()</code> trong <code>main</code> nghĩa là <code>this.new Inner()</code>, mà <code>main</code> là static, không có <code>this</code> (bài 6), nên không có quán nào để gắn vào.</li>
+</ul>
+
+<div class="remember"><strong>Static nested class</strong> = class bình thường, chỉ "ở nhờ" trong class khác. <strong>Inner class</strong> (không có <code>static</code>) = mỗi object luôn gắn với một object bên ngoài, qua field ẩn <code>this$0</code>.</div>
+
+<h2>4 · Sợi dây giữ chặt cả object bên ngoài: rò rỉ bộ nhớ</h2>
+<p>Đây là lý do bài này quan trọng khi đi làm. <code>Leak.java</code> mô phỏng một hệ thống: mỗi đơn hàng nặng 1 MB (có ảnh chụp hoá đơn), xử lý xong thì chỉ cần giữ lại một <strong>biên lai</strong> nhỏ chứa mã đơn. Hai cách viết biên lai:</p>
+<pre><code>static class DonHang {
+    byte[] anhChupHoaDon = new byte[1_000_000];       // mỗi đơn hàng nặng 1 MB
+    int ma;
+
+    class BienLaiInner { int ma() { return ma; } }    // inner: ngầm giữ cả DonHang
+    static class BienLaiNested {                      // static nested: chỉ giữ cái nó cần
+        final int ma;
+        BienLaiNested(int ma) { this.ma = ma; }
+    }
+}
+
+for (int i = 1; i &lt;= 1000; i++) {
+    DonHang d = new DonHang(i);
+    lichSu.add(dungInner ? d.new BienLaiInner() : new DonHang.BienLaiNested(d.ma));
+    // d ra khỏi scope ở đây: chỉ còn biên lai được giữ lại
+}</code></pre>
+<p>Chạy với heap 64 MB (cờ <code>-Xmx</code>, bài 9). <strong>Đoán trước:</strong> giữ 1000 biên lai thì có hết bộ nhớ không?</p>
+<pre><code>javac Leak.java
+java -Xmx64m Leak inner
+java -Xmx64m Leak nested</code></pre>
+<div class="expect"><pre><code>inner: <span class="hl">hết bộ nhớ sau 61 biên lai</span>: Java heap space
+nested: giữ 1000 biên lai, không sao</code></pre></div>
+<p>Vẽ ra đường đi của tham chiếu (bài 9):</p>
+<div class="expect"><pre><code>inner:   lichSu (static, GC root) → BienLaiInner → <span class="hl">this$0</span> → DonHang → byte[1 MB]   ✘ GC không dọn được
+nested:  lichSu (static, GC root) → BienLaiNested (chỉ có int ma)               ✔ DonHang thành rác, GC dọn</code></pre></div>
+<p>Code trông không có chỗ nào giữ <code>DonHang</code>: biến <code>d</code> đã ra khỏi scope. Nhưng mỗi <code>BienLaiInner</code> đeo sợi dây <code>this$0</code> về đơn hàng của nó, nên 1 MB ảnh chụp bị giữ lại theo. Trong heap dump, bạn sẽ thấy hàng nghìn <code>DonHang</code> "không ai dùng" mà không xoá được. Đó chính là dấu hiệu của loại rò rỉ này.</p>
+
+<div class="remember"><strong>Mặc định hãy viết <code>static</code></strong> cho class lồng bên trong. Chỉ bỏ <code>static</code> khi class đó <em>thật sự</em> cần đọc field của object bên ngoài. (<em>Effective Java</em>, Item 24: <em>"If you declare a member class that does not require access to an enclosing instance, always put the static modifier in its declaration"</em>.)</div>
+
+<h2>5 · Thư viện chuẩn dùng cả hai, đúng chỗ</h2>
+<pre><code>javap -p 'java.util.ArrayList$Itr' | grep this
+javap -p 'java.util.HashMap$Node' | grep this</code></pre>
+<div class="expect"><pre><code>  final java.util.ArrayList this$0;
+<em>(HashMap$Node: không có dòng nào)</em></code></pre></div>
+<ul>
+  <li><strong><code>ArrayList.Itr</code></strong> (iterator của <code>for (x : list)</code>) là <strong>inner class</strong>: nó cần đọc mảng <code>elementData</code> và <code>size</code> của chính list đang duyệt (bài 10). Đây là trường hợp sợi dây là cần thiết.</li>
+  <li><strong><code>HashMap.Node</code></strong> (mỗi ô key–value, bài 11) là <strong>static nested</strong>: một Node chỉ cần key, value, hash, next. Map có hàng triệu Node; nếu mỗi Node đeo thêm một sợi dây về map thì tốn bộ nhớ vô ích.</li>
+  <li>Mẫu <strong>Builder</strong> (<code>new Pizza.Builder().size(30).build()</code>) cũng là static nested: builder tồn tại <em>trước</em> khi có object bên ngoài, nên không thể là inner.</li>
+</ul>
+<p>Thêm một lý do thực tế: thư viện như Jackson (đọc JSON) hay JPA tạo object bằng reflection, thường qua constructor không tham số. Inner class thì không có constructor đó: như bạn thấy ở mục 2, constructor của nó luôn đòi object bên ngoài (<code>HaiLoai$Inner(HaiLoai)</code>). Vì vậy DTO hay entity khai báo lồng bên trong class khác phải là <code>static</code>.</p>
+
+<h2>6 · Tự kiểm tra</h2>
+<p>Không nhìn lại bài. Nghĩ ra đáp án trong đầu trước rồi mới bấm.</p>
+<div class="quiz" data-quiz="q21"></div>
+<script type="application/json" id="q21">[
+ {"q":"<code>class Ngoai { class Trong { } }</code>. Trong method <code>static void main</code> của <code>Ngoai</code>, viết <code>new Trong()</code> thì sao?",
+  "options":["Tạo được, Trong tự gắn với null","Lỗi biên dịch: không có this để gắn","Tạo được, compiler tự new Ngoai()","Lỗi lúc chạy: NullPointerException"],
+  "answer":1,
+  "why":"<code>new Trong()</code> nghĩa là <code>this.new Trong()</code>. <code>main</code> là static nên không có <code>this</code>: compiler báo <code>non-static variable this cannot be referenced from a static context</code>. Phải có object ngoài: <code>new Ngoai().new Trong()</code>."},
+ {"q":"<code>javap -p</code> một inner class có đọc field của class ngoài. Bạn thấy field ẩn nào?",
+  "options":["static Ngoai INSTANCE","private Object outer","this$0 trỏ tới chính Trong","final Ngoai this$0"],
+  "answer":3,
+  "why":"Compiler thêm <code>final Ngoai this$0</code> và một tham số <code>Ngoai</code> vào constructor. Mọi lần đọc field ngoài trong inner class đều đi qua <code>this$0</code>."},
+ {"q":"List static giữ 1000 object inner class, mỗi object outer nặng 1 MB. Vì sao heap 64 MB bị đầy?",
+  "options":["this$0 giữ outer, GC không dọn được","Inner class luôn nặng ít nhất 1 MB","Inner class lưu ở Metaspace, không phải heap","Mỗi inner class tạo ra một bản sao outer"],
+  "answer":0,
+  "why":"Static field là GC root → list → inner object → <code>this$0</code> → outer object → mảng 1 MB. Mọi thứ trên đường đi đều \"với tới được\" nên GC không dọn. Không có bản sao nào cả: chỉ là một tham chiếu ẩn."},
+ {"q":"Vì sao <code>HashMap.Node</code> là static nested, còn <code>ArrayList.Itr</code> là inner class?",
+  "options":["Vì Node cần đọc mảng của HashMap","Vì Itr được tạo trước khi có list","Node không cần map ngoài, Itr cần list","Vì inner class chạy nhanh hơn nested"],
+  "answer":2,
+  "why":"Iterator phải đọc <code>elementData</code>/<code>size</code> của đúng list đang duyệt, nên cần sợi dây <code>this$0</code>. Node chỉ chứa key/value/hash/next; thêm sợi dây vào hàng triệu Node là phí bộ nhớ."},
+ {"q":"(Ôn bài 21) Lambda <code>() -&gt; System.out.println(maSanPham)</code>, với <code>maSanPham</code> là <strong>field</strong> của object, giữ lại gì?",
+  "options":["Chỉ giữ bản sao giá trị maSanPham","Giữ this, tức là cả object chứa field","Không giữ gì, lambda không bắt biến","Giữ một bản sao của cả object"],
+  "answer":1,
+  "why":"Đọc field nghĩa là đọc <code>this.maSanPham</code>, nên lambda phải bắt <code>this</code>, và giữ cả object như inner class. Muốn chỉ giữ con số thì chép ra biến cục bộ trước: <code>int ma = maSanPham;</code>."}
+]</script>
+
+<h2>7 · Thử thách: listener làm rò rỉ bộ nhớ</h2>
+<div class="lab">
+<p><code>Challenge.java</code>: mỗi trang sản phẩm nặng 1 MB, đăng ký một listener vào "bus sự kiện" sống mãi (một list static) để in thông báo khi đổi giá:</p>
+<pre><code>void dangKy() {
+    // TODO: listener này làm rò rỉ bộ nhớ. Sửa CHỈ phần đăng ký này.
+    suKien.add(new Runnable() {
+        public void run() { System.out.println("Sản phẩm " + maSanPham + " vừa đổi giá"); }
+    });
+}</code></pre>
+<pre><code>javac Challenge.java
+java -Xmx64m Challenge</code></pre>
+<div class="expect"><pre><code>Hết bộ nhớ sau 61 trang</code></pre></div>
+<p><strong>Nhiệm vụ:</strong> (1) Giải thích vì sao rò rỉ. Gợi ý: class ẩn danh cũng là một inner class, thử <code>javap -p 'Challenge$TrangSanPham$1'</code>. (2) Sửa để đăng ký được 1000 trang, mà listener vẫn in đúng mã sản phẩm.</p>
+<details><summary>Xem lời giải</summary>
+<p>(1) <code>javap</code> cho thấy class ẩn danh có <code>final Challenge$TrangSanPham this$0;</code>. Nó đọc <code>maSanPham</code>, tức là đọc qua <code>this$0</code>, nên giữ cả trang 1 MB.</p>
+<p>(2) Chép giá trị cần dùng ra biến cục bộ, rồi dùng lambda (bài 21). Lambda chỉ bắt đúng biến nó dùng:</p>
+<pre><code>int ma = maSanPham;                              // chép ra biến cục bộ
+suKien.add(() -&gt; System.out.println("Sản phẩm " + ma + " vừa đổi giá"));</code></pre>
+<div class="expect"><pre><code>Đăng ký 1000 trang, không sao
+Sản phẩm 1000 vừa đổi giá</code></pre></div>
+<p><strong>Cẩn thận:</strong> nếu chỉ đổi sang lambda mà vẫn viết <code>maSanPham</code> (field) trong thân, lambda sẽ bắt <code>this</code> và rò rỉ y như cũ. Mình đã chạy thử: vẫn "Hết bộ nhớ sau 61 trang". Cách khác cũng đúng: viết một <code>static class</code> listener nhận <code>int ma</code> qua constructor.</p>
+</details>
+</div>
+
+<details class="deep"><summary>Đào sâu: từ Java 18, <code>this$0</code> có thể biến mất</summary>
+<p>Nếu inner class <em>không hề</em> dùng tới object bên ngoài, javac từ JDK 18 trở đi sẽ không tạo field <code>this$0</code> nữa.<a class="cite" href="https://bugs.openjdk.org/browse/JDK-8271623">[JDK-8271623]</a> <code>ThisZero.java</code>:</p>
+<pre><code>class KhongDungNgoai { int x() { return 42; } }       // không đụng tới object ngoài
+class CoDungNgoai    { int x() { return ten; } }      // đọc field của object ngoài</code></pre>
+<pre><code>javac ThisZero.java
+javap -p 'ThisZero$KhongDungNgoai' 'ThisZero$CoDungNgoai'</code></pre>
+<div class="expect"><pre><code>class ThisZero$KhongDungNgoai {
+  ThisZero$KhongDungNgoai(ThisZero);          ← vẫn đòi object ngoài, nhưng không giữ lại
+class ThisZero$CoDungNgoai {
+  final ThisZero this$0;
+  ThisZero$CoDungNgoai(ThisZero);</code></pre></div>
+<p>Đừng dựa vào điều này để "khỏi cần viết static": constructor vẫn đòi object bên ngoài (nên Jackson/JPA vẫn không tạo được), code chạy trên JDK cũ vẫn giữ sợi dây, và chỉ cần sau này ai đó thêm một dòng đọc field ngoài là rò rỉ quay lại. Chữ <code>static</code> nói rõ ý định và được compiler đảm bảo.</p>
+</details>
+
+<hr>
+<h2>Đọc thêm</h2>
+<p><a href="https://docs.oracle.com/javase/tutorial/java/javaOO/nested.html">Oracle Java Tutorial: Nested Classes</a>, ngắn, có phần "When to Use Nested Classes, Local Classes, Anonymous Classes, and Lambda Expressions". Sách: <em>Effective Java</em>, Item 24 "Favor static member classes over nonstatic".</p>
+
+<p class="ask">Có chỗ nào chưa hiểu, dù là chỗ nhỏ? Cứ hỏi agent (giáo viên của bạn). Ví dụ: "Local class (class khai báo trong method) thuộc loại nào?", "Inner class có được khai báo static field không?", "Làm sao tìm loại rò rỉ này trong heap dump?"... Nhớ gửi kết quả quiz và lời giải thử thách để mình nhận xét.</p>
+
+<div class="footer-nav"><a href="0021-lambda-stream.html">← Bài 21: Lambda và Stream</a><a href="0023-comparator-treemap-cme.html">Bài 23: Sắp xếp, TreeMap, LinkedHashMap, CME →</a></div>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
